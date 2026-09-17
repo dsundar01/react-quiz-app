@@ -51,141 +51,128 @@
   <textarea id="code" readonly></textarea>
 
   <script type="text/plain" id="bmsrc">
-(() => {
-  if (window.__mpMarker) return;
-  window.__mpMarker = 1;
-
-  const style = document.createElement('style');
-  style.textContent = `
+(()=>{
+  if(window.__mpMarker)return;
+  window.__mpMarker=1;
+  const css=document.createElement('style');
+  css.textContent=`
     body{position:relative}
-    .mpm-btn{position:fixed;bottom:20px;right:20px;width:44px;height:44px;border-radius:50%;background:#ef4444;color:#fff;border:none;font-size:20px;cursor:pointer;box-shadow:0 2px 10px rgba(0,0,0,.2);z-index:2147483647;display:flex;align-items:center;justify-content:center}
+    .mpm-btn{position:fixed;bottom:20px;right:20px;width:48px;height:48px;border-radius:50%;background:#ef4444;color:#fff;border:none;font-size:20px;cursor:pointer;box-shadow:0 2px 10px rgba(0,0,0,.2);z-index:2147483647;display:flex;align-items:center;justify-content:center}
     .mpm-btn:hover{background:#dc2626}
-    .mpm-panel{position:fixed;bottom:75px;right:20px;width:260px;background:#fff;border:1px solid #ddd;border-radius:10px;box-shadow:0 4px 20px rgba(0,0,0,.15);z-index:2147483647;display:none;flex-direction:column;overflow:hidden;font-family:system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}
+    .mpm-panel{position:fixed;bottom:78px;right:20px;width:260px;background:#fff;border:1px solid #c8dcfb;border-radius:10px;box-shadow:0 4px 20px rgba(0,0,0,.15);z-index:2147483647;display:none;flex-direction:column;overflow:hidden;font-family:system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}
     .mpm-panel.open{display:flex}
-    .mpm-header{padding:8px 12px;background:#f6f8fa;border-bottom:1px solid #eee;font-weight:600;font-size:13px;display:flex;justify-content:space-between;align-items:center}
+    .mpm-header{padding:8px 12px;background:#f6f8fa;border-bottom:1px solid #c8dcfb;font-weight:600;font-size:13px;display:flex;justify-content:space-between;align-items:center}
     .mpm-header button{background:none;border:none;cursor:pointer;font-size:14px;color:#666}
     .mpm-header button:hover{color:#111827}
-    .mpm-tools{display:flex;gap:8px;align-items:center;padding:10px 12px;border-bottom:1px solid #eee;font-size:12px;flex-wrap:wrap}
-    .mpm-dots{display:flex;align-items:center;gap:8px}
-    .mpm-dot{width:22px;height:22px;border-radius:999px;border:2px solid #d1d5db;cursor:pointer}
-    .mpm-dot.active{border-color:#111827}
-    .mpm-mode{flex:0 0 auto;background:#f3f4f6;border:1px solid #ddd;border-radius:6px;padding:4px 8px;cursor:pointer;font-size:12px}
-    .mpm-mode.active{background:#111827;color:#fff;border-color:#111827}
-    .mpm-tools input[type="range"]{width:90px}
+    .mpm-tools{display:flex;gap:8px;align-items:center;padding:10px 12px;border-bottom:1px solid #c8dcfb;font-size:13px;flex-wrap:wrap}
+    .mpm-mode{flex:0 0 auto;background:#f3f4f6;border:1px solid #ddd;border-radius:6px;padding:6px 10px;cursor:pointer;font-size:13px}
+    .mpm-mode.active{background:#2f7df6;color:#fff;border-color:#2f7df6}
+    .mpm-size{display:flex;align-items:center;gap:6px;color:#4b6386;font-size:13px}
+    .mpm-size input{width:90px}
+    .mpm-dots{display:flex;align-items:center;gap:6px}
+    .mpm-dot{width:24px;height:24px;border-radius:999px;border:2px solid #fff;box-shadow:0 0 0 1px rgba(15,39,74,.28);cursor:pointer}
+    .mpm-dot.active{box-shadow:0 0 0 2px #fff,0 0 0 3px #0f274a}
+    .mpm-color{width:24px;height:24px;border:0;padding:0;border-radius:50%;overflow:hidden;cursor:pointer;background:conic-gradient(#ef4444,#facc15,#16a34a,#2563eb,#a855f7,#ef4444)}
+    .mpm-color::-webkit-color-swatch-wrapper{padding:0}
+    .mpm-color::-webkit-color-swatch{border:0;border-radius:50%}
+    .mpm-erase,.mpm-eraser{width:28px;height:28px;border-radius:50%;background:#f6faff;border:1px solid #c8dcfb;cursor:pointer;display:inline-flex;align-items:center;justify-content:center}
+    .mpm-erase.active,.mpm-eraser.active{background:#0f274a;color:#fff;border-color:#0f274a}
+    .mpm-action{padding:6px 10px;border-radius:6px;cursor:pointer;font-size:13px;font-weight:600}
+    .mpm-clear{background:#fff1f4;color:#c93d4f;border:none}
     .mpm-overlay{position:absolute;top:0;left:0;z-index:2147483646;pointer-events:none}
-    .mpm-overlay.active{pointer-events:auto;cursor:crosshair}
-    .mpm-overlay canvas{width:100%;height:100%;display:block;touch-action:none}
+    .mpm-overlay.active{pointer-events:auto;cursor:crosshair;touch-action:none}
+    .mpm-overlay canvas{width:100%;height:100%;display:block}
     ::selection{background:rgba(239,68,68,.25)}
   `;
-  document.head.appendChild(style);
-
-  const root = document.createElement('div');
-  root.innerHTML = `
-    <button class="mpm-btn" title="Marker Pen">✎</button>
+  document.head.appendChild(css);
+  const root=document.createElement('div');
+  root.innerHTML=`<button class="mpm-btn" title="Marker Pen">✎</button>
     <div class="mpm-panel">
-      <div class="mpm-header"><span>Marker Pen</span><div><button data-act="clear" title="Clear">🗑</button><button data-act="close" title="Close">✕</button></div></div>
+      <div class="mpm-header"><span>Marker Pen</span><button data-act="close" title="Close">✕</button></div>
       <div class="mpm-tools">
-        <label>Size <input class="mpm-size" type="range" min="1" max="18" value="4"></label>
+        <button class="mpm-mode active" data-mode="underline">Underline</button>
+        <button class="mpm-mode" data-mode="text">Text</button>
+        <button class="mpm-mode" data-mode="laser">Laser</button>
+        <label class="mpm-size">Size<input type="range" min="1" max="18" value="4"></label>
         <div class="mpm-dots">
           <span class="mpm-dot active" data-color="#ef4444" style="background:#ef4444" title="Red"></span>
+          <span class="mpm-dot" data-color="#16a34a" style="background:#16a34a" title="Green"></span>
           <span class="mpm-dot" data-color="#facc15" style="background:#facc15" title="Yellow"></span>
-          <span class="mpm-dot" data-color="#22c55e" style="background:#22c55e" title="Green"></span>
-          <span class="mpm-dot" data-color="#111827" style="background:#111827" title="Black"></span>
         </div>
-        <button class="mpm-mode mpm-marker active" data-mode="marker">Pen</button>
-        <button class="mpm-mode mpm-underline" data-mode="underline">Underline</button>
+        <input class="mpm-color" type="color" value="#ef4444" title="Choose a custom RGB color">
+        <button class="mpm-eraser" data-mode="erase" title="Eraser">⌫</button>
+        <button class="mpm-action mpm-clear" data-act="clear">Clear marks</button>
       </div>
     </div>
-    <div class="mpm-overlay"><canvas></canvas></div>
-  `;
+    <div class="mpm-overlay"><canvas></canvas></div>`;
   document.body.appendChild(root);
-
-  const btn = root.querySelector('.mpm-btn');
-  const panel = root.querySelector('.mpm-panel');
-  const overlay = root.querySelector('.mpm-overlay');
-  const canvas = root.querySelector('canvas');
-  const ctx = canvas.getContext('2d');
-  const sizeInput = root.querySelector('.mpm-size');
-  const modeBtns = Array.from(root.querySelectorAll('.mpm-mode'));
-  const dotBtns = Array.from(root.querySelectorAll('.mpm-dot'));
-
-  let active = false, drawing = false, color = '#ef4444', mode = 'marker', strokes = [], current = null;
-  const setColor = (next) => {
-    color = next;
-    dotBtns.forEach(d => d.classList.toggle('active', d.dataset.color === color));
-  };
-  const key = () => `mpm:${location.pathname}${location.search}`;
-  const save = () => localStorage.setItem(key(), JSON.stringify(strokes));
-  const load = () => {
-    try { strokes = JSON.parse(localStorage.getItem(key()) || '[]'); } catch { strokes = []; }
-    drawAll();
-  };
-  const resize = () => {
-    const w = Math.max(document.documentElement.scrollWidth, document.documentElement.clientWidth);
-    const h = Math.max(document.documentElement.scrollHeight, document.documentElement.clientHeight);
-    canvas.width = w; canvas.height = h;
-    overlay.style.width = w + 'px'; overlay.style.height = h + 'px';
-    drawAll();
-  };
-  const drawAll = () => {
-    ctx.clearRect(0, 0, canvas.width, canvas.height);
-    ctx.lineCap = 'round'; ctx.lineJoin = 'round';
-    strokes.forEach(s => {
-      if (!s.points || s.points.length < 2) return;
-      ctx.strokeStyle = s.color; ctx.lineWidth = s.size;
-      ctx.beginPath(); ctx.moveTo(s.points[0].x, s.points[0].y);
-      for (let i = 1; i < s.points.length; i++) ctx.lineTo(s.points[i].x, s.points[i].y);
+  const btn=root.querySelector('.mpm-btn');
+  const panel=root.querySelector('.mpm-panel');
+  const overlay=root.querySelector('.mpm-overlay');
+  const canvas=root.querySelector('canvas');
+  const ctx=canvas.getContext('2d');
+  const sizeInput=root.querySelector('.mpm-size input');
+  const modeBtns=Array.from(root.querySelectorAll('.mpm-mode'));
+  const dotBtns=Array.from(root.querySelectorAll('.mpm-dot'));
+  const colorInput=root.querySelector('.mpm-color');
+  const eraserBtn=root.querySelector('.mpm-eraser');
+  let active=false,drawing=false,color='#ef4444',mode='underline',size=4,strokes=[],current=null,laser=null,laserFade=null;
+  const key=()=>`mpm:${location.host}${location.pathname}${location.search}`;
+  const save=()=>{localStorage.setItem(key(),JSON.stringify(strokes));};
+  const load=()=>{try{strokes=JSON.parse(localStorage.getItem(key())||'[]');}catch{strokes=[];}drawAll();};
+  const resize=()=>{const w=Math.max(document.documentElement.scrollWidth,document.documentElement.clientWidth);const h=Math.max(document.documentElement.scrollHeight,document.documentElement.clientHeight);canvas.width=w;canvas.height=h;overlay.style.width=w+'px';overlay.style.height=h+'px';drawAll();};
+  const drawAll=()=>{
+    ctx.clearRect(0,0,canvas.width,canvas.height);
+    ctx.lineCap='round';ctx.lineJoin='round';
+    for(const s of strokes){
+      if(s.type==='text'){ctx.globalCompositeOperation='source-over';ctx.fillStyle=s.color;ctx.font=`${Math.max(s.size*4,14)}px Segoe UI, sans-serif`;ctx.fillText(s.text,s.x,s.y);continue;}
+      if(!s.points||s.points.length<2)continue;
+      ctx.globalCompositeOperation=s.type==='erase'?'destination-out':'source-over';
+      ctx.strokeStyle=s.color;ctx.lineWidth=s.size;
+      ctx.beginPath();ctx.moveTo(s.points[0].x,s.points[0].y);
+      for(let i=1;i<s.points.length;i++)ctx.lineTo(s.points[i].x,s.points[i].y);
       ctx.stroke();
-    });
+    }
+    ctx.globalCompositeOperation='source-over';
   };
-  const setMode = (next) => {
-    mode = next;
-    modeBtns.forEach(b => b.classList.toggle('active', b.dataset.mode === mode));
-    overlay.classList.toggle('active', active && mode === 'marker');
+  const drawCurrent=()=>{
+    if(!current||!current.points||current.points.length<2)return;
+    ctx.save();
+    ctx.lineCap='round';ctx.lineJoin='round';
+    ctx.globalCompositeOperation=current.type==='erase'?'destination-out':'source-over';
+    ctx.strokeStyle=current.color;ctx.lineWidth=current.size;
+    if(current.type==='laser'){ctx.shadowColor=current.color;ctx.shadowBlur=12;}
+    ctx.beginPath();ctx.moveTo(current.points[0].x,current.points[0].y);
+    for(let i=1;i<current.points.length;i++)ctx.lineTo(current.points[i].x,current.points[i].y);
+    ctx.stroke();ctx.restore();
   };
-  const setActive = (next) => {
-    active = next; panel.classList.toggle('open', active);
-    overlay.classList.toggle('active', active && mode === 'marker');
-  };
-  const pt = (e) => ({ x: e.pageX, y: e.pageY });
-  const start = (e) => { if (!active || mode !== 'marker') return; e.preventDefault(); drawing = true; current = { color, size: +sizeInput.value, points: [pt(e)] }; };
-  const move = (e) => { if (!drawing || !active || mode !== 'marker') return; e.preventDefault(); current.points.push(pt(e)); const a = current.points[current.points.length - 2], b = current.points[current.points.length - 1]; ctx.strokeStyle = current.color; ctx.lineWidth = current.size; ctx.beginPath(); ctx.moveTo(a.x, a.y); ctx.lineTo(b.x, b.y); ctx.stroke(); };
-  const end = () => { if (drawing && current && current.points.length > 1) { strokes.push(current); save(); } drawing = false; current = null; };
-  const addUnderline = () => {
-    if (!active || mode !== 'underline') return;
-    const sel = window.getSelection();
-    if (!sel || sel.isCollapsed) return;
-    const range = sel.getRangeAt(0);
-    const rects = Array.from(range.getClientRects());
-    const sx = window.scrollX, sy = window.scrollY;
-    const size = +sizeInput.value;
-    rects.forEach(r => {
-      const y = r.bottom + sy + 2;
-      strokes.push({ color, size, points: [{ x: r.left + sx, y }, { x: r.right + sx, y }] });
-    });
-    save(); drawAll();
-    sel.removeAllRanges();
-  };
-
-  btn.onclick = () => setActive(!active);
-  root.querySelector('[data-act="close"]').onclick = () => setActive(false);
-  root.querySelector('[data-act="clear"]').onclick = () => { strokes = []; save(); drawAll(); };
-  sizeInput.oninput = () => (ctx.lineWidth = +sizeInput.value);
-  modeBtns.forEach(b => b.onclick = () => setMode(b.dataset.mode));
-  dotBtns.forEach(d => d.onclick = () => setColor(d.dataset.color));
-  canvas.addEventListener('mousedown', start);
-  canvas.addEventListener('mousemove', move);
-  window.addEventListener('mouseup', end);
-  window.addEventListener('mouseup', addUnderline);
-  canvas.addEventListener('mouseleave', end);
-  window.addEventListener('resize', resize);
-  document.addEventListener('keydown', (e) => { if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'z' && active && strokes.length) { strokes.pop(); save(); drawAll(); e.preventDefault(); } });
-  canvas.addEventListener('touchstart', (e) => { const t = e.touches[0]; if (!t) return; start({ pageX: t.pageX, pageY: t.pageY, preventDefault: () => e.preventDefault() }); }, { passive: false });
-  canvas.addEventListener('touchmove', (e) => { const t = e.touches[0]; if (!t) return; move({ pageX: t.pageX, pageY: t.pageY, preventDefault: () => e.preventDefault() }); }, { passive: false });
-  window.addEventListener('touchend', end);
-
-  resize();
-  load();
+  const setMode=(next)=>{mode=next;modeBtns.forEach(b=>b.classList.toggle('active',b.dataset.mode===next));eraserBtn.classList.toggle('active',next==='erase');};
+  const setColor=(next)=>{color=next;dotBtns.forEach(d=>d.classList.toggle('active',d.dataset.color===next));colorInput.value=next;};
+  const setActive=(next)=>{active=next;panel.classList.toggle('open',active);overlay.classList.toggle('active',active);};
+  const pt=(e)=>({x:e.pageX,y:e.pageY});
+  const start=(e)=>{if(!active||e.button!==0)return;e.preventDefault();const p=pt(e);if(mode==='text'){const text=window.prompt('Add note:');if(text&&text.trim()){strokes.push({type:'text',color,size,x:p.x,y:p.y,text:text.trim()});save();drawAll();}return;}drawing=true;current={type:mode,color,size,points:[p]};};
+  const move=(e)=>{if(!drawing||!current)return;e.preventDefault();const p=pt(e);if(mode==='underline'){current.points[1]={x:p.x,y:current.points[0].y};}else{current.points.push(p);}drawAll();drawCurrent();};
+  const fadeLaser=()=>{if(laserFade)cancelAnimationFrame(laserFade);laser=current;const start=performance.now();const step=(now)=>{const o=Math.max(0,1-(now-start)/900);drawAll();if(laser&&laser.points){ctx.save();ctx.globalCompositeOperation='source-over';ctx.globalAlpha=o;ctx.strokeStyle=color;ctx.lineWidth=size;ctx.lineCap='round';ctx.lineJoin='round';ctx.shadowColor=color;ctx.shadowBlur=12;ctx.beginPath();ctx.moveTo(laser.points[0].x,laser.points[0].y);for(let i=1;i<laser.points.length;i++)ctx.lineTo(laser.points[i].x,laser.points[i].y);ctx.stroke();ctx.restore();}if(o>0){laserFade=requestAnimationFrame(step);}else{laser=null;laserFade=null;}};laserFade=requestAnimationFrame(step);};
+  const end=()=>{if(!drawing||!current)return;drawing=false;if(mode==='laser'){fadeLaser();current=null;return;}if(current.points.length>1){strokes.push(current);save();}current=null;drawAll();};
+  const clear=()=>{if(confirm('Clear all marks?')){strokes=[];save();drawAll();}};
+  btn.onclick=()=>setActive(!active);
+  root.querySelector('[data-act="close"]').onclick=()=>setActive(false);
+  root.querySelector('[data-act="clear"]').onclick=clear;
+  sizeInput.oninput=(e)=>{size=+e.target.value;ctx.lineWidth=size;};
+  modeBtns.forEach(b=>b.onclick=()=>setMode(b.dataset.mode));
+  eraserBtn.onclick=()=>setMode('erase');
+  dotBtns.forEach(d=>d.onclick=()=>setColor(d.dataset.color));
+  colorInput.oninput=(e)=>setColor(e.target.value);
+  canvas.addEventListener('mousedown',start);
+  canvas.addEventListener('mousemove',move);
+  canvas.addEventListener('mouseleave',()=>{if(drawing)end();});
+  window.addEventListener('mouseup',end);
+  window.addEventListener('resize',resize);
+  document.addEventListener('keydown',(e)=>{if((e.ctrlKey||e.metaKey)&&e.key.toLowerCase()==='z'&&active){strokes.pop();save();drawAll();e.preventDefault();}});
+  canvas.addEventListener('touchstart',(e)=>{const t=e.touches[0];if(!t)return;start({pageX:t.pageX,pageY:t.pageY,preventDefault:()=>e.preventDefault(),button:0});},{passive:false});
+  canvas.addEventListener('touchmove',(e)=>{const t=e.touches[0];if(!t)return;move({pageX:t.pageX,pageY:t.pageY,preventDefault:()=>e.preventDefault()});},{passive:false});
+  window.addEventListener('touchend',end);
+  resize();load();
 })();
   </script>
 
