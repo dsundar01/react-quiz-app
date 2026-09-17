@@ -30,6 +30,27 @@ const mapReadLaterItem = (item) => ({
 
 const mapTopic = (item) => item.name;
 
+const describeFunctionError = async (error) => {
+  if (!error) return 'No error returned';
+  console.error('Edge Function error:', error);
+  const status = error?.context?.status;
+  if (typeof status === 'number') {
+    try {
+      const body = await error.context.json();
+      return `HTTP ${status}: ${body?.error || JSON.stringify(body)}`;
+    } catch {
+      try {
+        const text = await error.context.text();
+        const preview = text?.slice(0, 300) || '(empty body)';
+        return `HTTP ${status}: ${preview}`;
+      } catch (readErr) {
+        return `HTTP ${status}: (could not read response body: ${readErr.message})`;
+      }
+    }
+  }
+  return `${error.name || 'Edge Function error'}: ${error.message}`;
+};
+
 function App() {
   const [websiteTitleInput, setWebsiteTitleInput] = useState('');
   const [websiteUrlInput, setWebsiteUrlInput] = useState('');
@@ -213,9 +234,11 @@ function App() {
       );
 
       if (snapshotError || !snapshotData?.website) {
-        setWebsiteNotice(
-          'Website saved, but its content snapshot could not be created. Deploy capture-website in Supabase.',
-        );
+        const reason = snapshotData?.error
+          ? `Server: ${snapshotData.error}`
+          : await describeFunctionError(snapshotError);
+        setWebsiteNotice('Website saved, but its content snapshot could not be created.');
+        setWebsiteError(`Snapshot failed: ${reason}`);
       } else {
         const { data: storedSite, error: storedSiteError } = await supabase
           .from('saved_websites')
@@ -392,7 +415,9 @@ function App() {
     });
 
     if (error || !data?.website) {
-      const message = error?.message || 'The capture function did not return a snapshot.';
+      const message = data?.error
+        ? `Server: ${data.error}`
+        : await describeFunctionError(error);
       setWebsiteError(`Unable to capture snapshot: ${message}`);
       setIsBusy(false);
       return;
