@@ -306,6 +306,33 @@ select {
   font-weight: 700;
 }
 
+.html-upload-button {
+  grid-column: 1 / -1;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 44px;
+  padding: 0.65rem 1.1rem;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: #eef4ff;
+  color: var(--accent);
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.html-upload-button:hover {
+  background: #dcecff;
+}
+
+.html-upload-button input {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  opacity: 0;
+  pointer-events: none;
+}
+
 .error-text {
   margin: 0;
   color: var(--danger);

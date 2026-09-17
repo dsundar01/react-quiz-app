@@ -54,7 +54,8 @@ function App() {
   const [textInput, setTextInput] = useState(null);
   const [laserStroke, setLaserStroke] = useState(null);
   const [laserOpacity, setLaserOpacity] = useState(0);
-    const annotationCanvasRef = useRef(null);
+  const htmlFileInputRef = useRef(null);
+  const annotationCanvasRef = useRef(null);
   const currentStrokeRef = useRef(null);
   const drawFrameRef = useRef(null);
   const pendingAnnotationsRef = useRef([]);
@@ -239,6 +240,84 @@ function App() {
     }
 
     setWebsiteError('Supabase is not configured. The website was not saved.');
+    setIsBusy(false);
+  };
+
+  const handleHtmlUpload = async (event) => {
+    const file = event.target.files?.[0];
+    event.target.value = '';
+    if (!file) return;
+    const isHtml =
+      file.type === 'text/html' ||
+      file.name.toLowerCase().endsWith('.html') ||
+      file.name.toLowerCase().endsWith('.htm');
+    if (!isHtml) {
+      setWebsiteError('Please choose an HTML file.');
+      return;
+    }
+    if (file.size > 2_000_000) {
+      setWebsiteError('HTML files must be 2 MB or smaller.');
+      return;
+    }
+    if (!selectedTopic) {
+      setWebsiteError('Please select a topic before uploading an HTML file.');
+      return;
+    }
+    if (!supabase) {
+      setWebsiteError('Supabase is not configured. The HTML file was not uploaded.');
+      return;
+    }
+
+    const title = websiteTitleInput.trim() || file.name.replace(/\.html?$/i, '');
+    const url = `uploaded-html://${file.name}`;
+    if (cachedWebsites.some((site) => site.url.toLowerCase() === url.toLowerCase())) {
+      setWebsiteError('This HTML file is already saved.');
+      return;
+    }
+    const topic = selectedTopic;
+    setIsBusy(true);
+    setWebsiteError('');
+
+    let snapshotHtml;
+    try {
+      snapshotHtml = await file.text();
+    } catch (readError) {
+      setWebsiteError(`Unable to read HTML file: ${readError.message}`);
+      setIsBusy(false);
+      return;
+    }
+
+    const { data: savedRecord, error: insertError } = await supabase
+      .from('saved_websites')
+      .insert({ title, url, topic })
+      .select('id, title, url, topic, snapshot_html, snapshot_created_at, annotations, created_at')
+      .single();
+
+    if (insertError) {
+      setWebsiteError(`Unable to create HTML entry: ${insertError.message}`);
+      setIsBusy(false);
+      return;
+    }
+
+    const { data: uploadedRecord, error: updateError } = await supabase
+      .from('saved_websites')
+      .update({ snapshot_html: snapshotHtml, snapshot_created_at: new Date().toISOString() })
+      .eq('id', savedRecord.id)
+      .select('id, title, url, topic, snapshot_html, snapshot_created_at, annotations, created_at')
+      .single();
+
+    if (updateError) {
+      await supabase.from('saved_websites').delete().eq('id', savedRecord.id);
+      setWebsiteError(`Unable to save HTML snapshot: ${updateError.message}`);
+      setIsBusy(false);
+      return;
+    }
+
+    const savedSite = mapSupabaseSite(uploadedRecord);
+    setCachedWebsites((previous) => [savedSite, ...previous]);
+    setActiveSiteId(savedSite.id);
+    setWebsiteTitleInput('');
+    setWebsiteNotice('HTML file uploaded and saved to Supabase.');
     setIsBusy(false);
   };
 
@@ -1202,6 +1281,16 @@ function App() {
               >
                 {isBusy ? 'Saving...' : 'Save'}
               </button>
+              <label className="html-upload-button">
+                <input
+                  ref={htmlFileInputRef}
+                  type="file"
+                  accept=".html,.htm,text/html"
+                  onChange={handleHtmlUpload}
+                  disabled={isBusy}
+                />
+                {selectedTopic ? `Upload HTML to ${selectedTopic}` : 'Select a topic to upload HTML'}
+              </label>
             </div>
             {websiteError && <p className="error-text">{websiteError}</p>}
             {websiteNotice && <p className="success-text">{websiteNotice}</p>}
