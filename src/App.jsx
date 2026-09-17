@@ -1,10 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { Eraser, Pencil } from 'lucide-react';
-import * as pdfjs from 'pdfjs-dist';
-import pdfWorker from 'pdfjs-dist/build/pdf.worker.min.mjs?url';
 import { supabase } from './lib/supabaseClient';
-
-pdfjs.GlobalWorkerOptions.workerSrc = pdfWorker;
 
 const normalizeSiteName = (url) => {
   try {
@@ -20,7 +16,6 @@ const mapSupabaseSite = (item) => ({
   url: item.url,
   topic: item.topic || 'General',
   snapshotHtml: item.snapshot_html,
-  snapshotPdfPath: item.snapshot_pdf_path,
   snapshotCreatedAt: item.snapshot_created_at,
   annotations: Array.isArray(item.annotations) ? item.annotations : [],
   createdAt: item.created_at,
@@ -34,173 +29,6 @@ const mapReadLaterItem = (item) => ({
 });
 
 const mapTopic = (item) => item.name;
-
-function PdfSnapshotViewer({ pdfUrl, annotations, onAnnotationsChange, penEnabled, penMode, penColor, penSize }) {
-  const viewerRef = useRef(null);
-  const pageCanvasesRef = useRef(new Map());
-  const overlayCanvasesRef = useRef(new Map());
-  const strokeRef = useRef(null);
-  const pdfRenderTasksRef = useRef([]);
-  const [pages, setPages] = useState([]);
-  const [error, setError] = useState('');
-
-  const drawPageAnnotations = (pageNumber, temporaryStroke = null) => {
-    const canvas = overlayCanvasesRef.current.get(pageNumber);
-    if (!canvas) return;
-    const context = canvas.getContext('2d');
-    const width = canvas.clientWidth;
-    const height = canvas.clientHeight;
-    const ratio = window.devicePixelRatio || 1;
-    canvas.width = width * ratio;
-    canvas.height = height * ratio;
-    context.scale(ratio, ratio);
-    context.clearRect(0, 0, width, height);
-    context.lineCap = 'round';
-    context.lineJoin = 'round';
-
-    const drawStroke = (stroke) => {
-      if (stroke.pageNumber !== pageNumber) return;
-      if (stroke.mode === 'text') {
-        const point = stroke.points?.[0];
-        if (!point || !stroke.text) return;
-        context.globalCompositeOperation = 'source-over';
-        context.fillStyle = stroke.color;
-        context.font = `${Math.max(stroke.size * 4, 14)}px Segoe UI, sans-serif`;
-        context.fillText(stroke.text, point.x * width, point.y * height);
-        return;
-      }
-      if (!stroke.points || stroke.points.length < 2) return;
-      const points = stroke.points.map((point) => ({ x: point.x * width, y: point.y * height }));
-      context.globalCompositeOperation = stroke.mode === 'erase' ? 'destination-out' : 'source-over';
-      context.strokeStyle = stroke.color;
-      context.lineWidth = stroke.size;
-      context.beginPath();
-      context.moveTo(points[0].x, points[0].y);
-      context.lineTo(points[points.length - 1].x, points[points.length - 1].y);
-      context.stroke();
-    };
-
-    annotations.forEach(drawStroke);
-    if (temporaryStroke) drawStroke(temporaryStroke);
-    context.globalCompositeOperation = 'source-over';
-  };
-
-  useEffect(() => {
-    let cancelled = false;
-    let pdfDocument = null;
-    const loadPdf = async () => {
-      setError('');
-      setPages([]);
-      try {
-        const response = await fetch(pdfUrl);
-        if (!response.ok) {
-          throw new Error(`The saved PDF could not be downloaded (status ${response.status}).`);
-        }
-        const contentType = response.headers.get('content-type') || '';
-        if (!contentType.includes('application/pdf')) {
-          throw new Error('The saved file is not being served as a PDF.');
-        }
-        const data = new Uint8Array(await response.arrayBuffer());
-        pdfDocument = await pdfjs.getDocument({ data }).promise;
-        if (cancelled) return;
-        setPages(Array.from({ length: pdfDocument.numPages }, (_, index) => index + 1));
-        await new Promise((resolve) => requestAnimationFrame(resolve));
-        if (cancelled) return;
-        const viewerWidth = Math.max(viewerRef.current?.clientWidth - 32 || 720, 320);
-        for (let pageNumber = 1; pageNumber <= pdfDocument.numPages; pageNumber += 1) {
-          if (cancelled) return;
-          const page = await pdfDocument.getPage(pageNumber);
-          const naturalViewport = page.getViewport({ scale: 1 });
-          const viewport = page.getViewport({ scale: Math.min(1.5, viewerWidth / naturalViewport.width) });
-          const canvas = pageCanvasesRef.current.get(pageNumber);
-          if (!canvas) continue;
-          canvas.width = viewport.width;
-          canvas.height = viewport.height;
-          const renderTask = page.render({ canvasContext: canvas.getContext('2d'), viewport });
-          pdfRenderTasksRef.current.push(renderTask);
-          await renderTask.promise;
-          if (cancelled) return;
-          drawPageAnnotations(pageNumber);
-        }
-      } catch (renderError) {
-        if (cancelled) return;
-        const message = renderError instanceof Error ? renderError.message : 'Unknown PDF rendering error.';
-        setError(`Unable to render this saved PDF: ${message}`);
-      }
-    };
-    loadPdf();
-    return () => {
-      cancelled = true;
-      pdfRenderTasksRef.current.forEach((renderTask) => renderTask.cancel());
-      pdfRenderTasksRef.current = [];
-      pdfDocument?.destroy();
-    };
-  }, [pdfUrl]);
-
-  useEffect(() => {
-    pages.forEach((pageNumber) => drawPageAnnotations(pageNumber));
-  }, [annotations, pages]);
-
-  const getPoint = (event, pageNumber) => {
-    const bounds = overlayCanvasesRef.current.get(pageNumber).getBoundingClientRect();
-    return { x: (event.clientX - bounds.left) / bounds.width, y: (event.clientY - bounds.top) / bounds.height };
-  };
-
-  const startAnnotation = (event, pageNumber) => {
-    if (!penEnabled) return;
-    if (penMode === 'text') {
-      const text = window.prompt('Add note:')?.trim();
-      if (text) {
-        onAnnotationsChange((previous) => [
-          ...previous,
-          { mode: 'text', pageNumber, color: penColor, size: penSize, points: [getPoint(event, pageNumber)], text },
-        ]);
-      }
-      return;
-    }
-    event.currentTarget.setPointerCapture(event.pointerId);
-    strokeRef.current = {
-      mode: penMode,
-      pageNumber,
-      color: penColor,
-      size: penMode === 'erase' ? Math.max(penSize * 3, 14) : penSize,
-      points: [getPoint(event, pageNumber)],
-    };
-  };
-
-  const moveAnnotation = (event, pageNumber) => {
-    const stroke = strokeRef.current;
-    if (!stroke || stroke.pageNumber !== pageNumber) return;
-    const point = getPoint(event, pageNumber);
-    stroke.points[1] = stroke.mode === 'underline' ? { x: point.x, y: stroke.points[0].y } : point;
-    drawPageAnnotations(pageNumber, stroke);
-  };
-
-  const finishAnnotation = () => {
-    const stroke = strokeRef.current;
-    strokeRef.current = null;
-    if (stroke?.points?.length > 1) onAnnotationsChange((previous) => [...previous, stroke]);
-  };
-
-  return (
-    <div ref={viewerRef} className="pdf-annotation-viewer">
-      {error && <p className="error-text">{error}</p>}
-      {pages.map((pageNumber) => (
-        <div key={pageNumber} className="pdf-page">
-          <canvas ref={(node) => node && pageCanvasesRef.current.set(pageNumber, node)} />
-          <canvas
-            ref={(node) => node && overlayCanvasesRef.current.set(pageNumber, node)}
-            className={penEnabled ? 'pdf-annotation-layer drawing' : 'pdf-annotation-layer'}
-            onPointerDown={(event) => startAnnotation(event, pageNumber)}
-            onPointerMove={(event) => moveAnnotation(event, pageNumber)}
-            onPointerUp={finishAnnotation}
-            onPointerCancel={finishAnnotation}
-          />
-        </div>
-      ))}
-    </div>
-  );
-}
 
 function App() {
   const [websiteTitleInput, setWebsiteTitleInput] = useState('');
@@ -226,8 +54,7 @@ function App() {
   const [textInput, setTextInput] = useState(null);
   const [laserStroke, setLaserStroke] = useState(null);
   const [laserOpacity, setLaserOpacity] = useState(0);
-  const pdfFileInputRef = useRef(null);
-  const annotationCanvasRef = useRef(null);
+    const annotationCanvasRef = useRef(null);
   const currentStrokeRef = useRef(null);
   const drawFrameRef = useRef(null);
   const pendingAnnotationsRef = useRef([]);
@@ -238,10 +65,6 @@ function App() {
   const annotationToolRef = useRef({ enabled: false, mode: 'underline', color: '#ef4444', size: 4 });
 
   const activeSite = cachedWebsites.find((site) => site.id === activeSiteId) ?? null;
-  const activePdfUrl =
-    activeSite?.snapshotPdfPath && supabase
-      ? supabase.storage.from('website-snapshots').getPublicUrl(activeSite.snapshotPdfPath).data.publicUrl
-      : '';
   const hasUnsavedAnnotationChanges =
     JSON.stringify(draftAnnotations) !== JSON.stringify(activeSite?.annotations ?? []);
 
@@ -282,7 +105,7 @@ function App() {
 
       const { data, error } = await supabase
         .from('saved_websites')
-        .select('id, title, url, topic, snapshot_html, snapshot_pdf_path, snapshot_created_at, annotations, created_at')
+        .select('id, title, url, topic, snapshot_html, snapshot_created_at, annotations, created_at')
         .order('created_at', { ascending: false });
 
       if (error) {
@@ -312,7 +135,7 @@ function App() {
         .order('created_at', { ascending: false });
 
       if (readLaterError) {
-        setWebsiteError(`Unable to load Read later items: ${readLaterError.message}`);
+        setWebsiteError(`Unable to load Bookmarks items: ${readLaterError.message}`);
       } else {
         setReadLaterItems((readLaterData || []).map(mapReadLaterItem));
         setWebsiteNotice('');
@@ -371,7 +194,7 @@ function App() {
       const { data, error } = await supabase
         .from('saved_websites')
         .insert({ title, url: normalizedUrl, topic })
-        .select('id, title, url, topic, snapshot_html, snapshot_pdf_path, snapshot_created_at, annotations, created_at')
+        .select('id, title, url, topic, snapshot_html, snapshot_created_at, annotations, created_at')
         .single();
 
       if (error) {
@@ -395,7 +218,7 @@ function App() {
       } else {
         const { data: storedSite, error: storedSiteError } = await supabase
           .from('saved_websites')
-          .select('id, title, url, topic, snapshot_html, snapshot_pdf_path, snapshot_created_at, annotations, created_at')
+          .select('id, title, url, topic, snapshot_html, snapshot_created_at, annotations, created_at')
           .eq('id', savedSite.id)
           .single();
         if (storedSiteError) {
@@ -419,78 +242,6 @@ function App() {
     setIsBusy(false);
   };
 
-  const handlePdfUpload = async (event) => {
-    const file = event.target.files?.[0];
-    event.target.value = '';
-    if (!file) return;
-    if (file.type !== 'application/pdf' && !file.name.toLowerCase().endsWith('.pdf')) {
-      setWebsiteError('Please choose a PDF file.');
-      return;
-    }
-    if (file.size > 20_000_000) {
-      setWebsiteError('PDF files must be 20 MB or smaller.');
-      return;
-    }
-    if (!selectedTopic) {
-      setWebsiteError('Please select a topic before uploading a PDF.');
-      return;
-    }
-    if (!supabase) {
-      setWebsiteError('Supabase is not configured. The PDF was not uploaded.');
-      return;
-    }
-
-    const title = websiteTitleInput.trim() || file.name.replace(/\.pdf$/i, '');
-    const topic = selectedTopic;
-    setIsBusy(true);
-    setWebsiteError('');
-
-    const { data: savedRecord, error: insertError } = await supabase
-      .from('saved_websites')
-      .insert({ title, url: `uploaded-pdf://${file.name}`, topic })
-      .select('id, title, url, topic, snapshot_html, snapshot_pdf_path, snapshot_created_at, annotations, created_at')
-      .single();
-
-    if (insertError) {
-      setWebsiteError(`Unable to create PDF entry: ${insertError.message}`);
-      setIsBusy(false);
-      return;
-    }
-
-    const pdfPath = `${savedRecord.id}/${file.name.replace(/[^a-z0-9._-]/gi, '_')}`;
-    const { error: uploadError } = await supabase.storage.from('website-snapshots').upload(pdfPath, file, {
-      contentType: 'application/pdf',
-      upsert: false,
-    });
-
-    if (uploadError) {
-      await supabase.from('saved_websites').delete().eq('id', savedRecord.id);
-      setWebsiteError(`Unable to upload PDF: ${uploadError.message}`);
-      setIsBusy(false);
-      return;
-    }
-
-    const { data: uploadedRecord, error: updateError } = await supabase
-      .from('saved_websites')
-      .update({ snapshot_pdf_path: pdfPath, snapshot_created_at: new Date().toISOString() })
-      .eq('id', savedRecord.id)
-      .select('id, title, url, topic, snapshot_html, snapshot_pdf_path, snapshot_created_at, annotations, created_at')
-      .single();
-
-    if (updateError) {
-      setWebsiteError(`PDF uploaded, but its record could not be updated: ${updateError.message}`);
-      setIsBusy(false);
-      return;
-    }
-
-    const savedSite = mapSupabaseSite(uploadedRecord);
-    setCachedWebsites((previous) => [savedSite, ...previous]);
-    setActiveSiteId(savedSite.id);
-    setWebsiteTitleInput('');
-    setWebsiteNotice('PDF uploaded and saved to Supabase.');
-    setIsBusy(false);
-  };
-
   const handleSaveForLater = async () => {
     const trimmedUrl = readLaterUrlInput.trim();
     const trimmedTitle = readLaterTitleInput.trim();
@@ -510,7 +261,7 @@ function App() {
 
     const url = parsedUrl.href;
     if (readLaterItems.some((item) => item.url.toLowerCase() === url.toLowerCase())) {
-      setWebsiteError('This URL is already in Read later.');
+      setWebsiteError('This URL is already in Bookmarks.');
       return;
     }
     if (!supabase) {
@@ -527,7 +278,7 @@ function App() {
       .single();
 
     if (error) {
-      setWebsiteError(`Unable to save Read later item: ${error.message}`);
+      setWebsiteError(`Unable to save Bookmarks item: ${error.message}`);
       setIsBusy(false);
       return;
     }
@@ -535,15 +286,15 @@ function App() {
     setReadLaterItems((previous) => [mapReadLaterItem(data), ...previous]);
     setReadLaterTitleInput('');
     setReadLaterUrlInput('');
-    setWebsiteNotice('Added to Read later.');
+    setWebsiteNotice('Added to Bookmarks.');
     setIsBusy(false);
   };
 
   const removeReadLaterItem = async (item) => {
-    if (!window.confirm(`Remove "${item.title}" from Read later?`)) return;
+    if (!window.confirm(`Remove "${item.title}" from Bookmarks?`)) return;
     const { error } = await supabase.from('read_later_items').delete().eq('id', item.id);
     if (error) {
-      setWebsiteError(`Unable to remove Read later item: ${error.message}`);
+      setWebsiteError(`Unable to remove Bookmarks item: ${error.message}`);
       return;
     }
     setReadLaterItems((previous) => previous.filter((savedItem) => savedItem.id !== item.id));
@@ -570,7 +321,7 @@ function App() {
 
     const { data: storedSite, error: storedSiteError } = await supabase
       .from('saved_websites')
-      .select('id, title, url, topic, snapshot_html, snapshot_pdf_path, snapshot_created_at, annotations, created_at')
+      .select('id, title, url, topic, snapshot_html, snapshot_created_at, annotations, created_at')
       .eq('id', site.id)
       .single();
 
@@ -754,7 +505,7 @@ function App() {
     const undoLastStroke = (event) => {
       if (
         !penEnabled ||
-        !(activeSite?.snapshotHtml || activeSite?.snapshotPdfPath) ||
+        !activeSite?.snapshotHtml ||
         !(event.ctrlKey || event.metaKey) ||
         event.key.toLowerCase() !== 'z'
       ) {
@@ -1094,17 +845,7 @@ function App() {
               </div>
             </div>
             <div ref={snapshotViewerRef} className="snapshot-viewer">
-              {activeSite.snapshotPdfPath ? (
-                <PdfSnapshotViewer
-                  pdfUrl={activePdfUrl}
-                  annotations={draftAnnotations}
-                  onAnnotationsChange={setDraftAnnotations}
-                  penEnabled={penEnabled}
-                  penMode={penMode}
-                  penColor={penColor}
-                  penSize={penSize}
-                />
-              ) : activeSite.snapshotHtml ? (
+              {activeSite.snapshotHtml ? (
                 <iframe
                   ref={snapshotFrameRef}
                   title={activeSite.title}
@@ -1187,7 +928,7 @@ function App() {
                 </div>
               )}
             </div>
-            {(activeSite.snapshotHtml || activeSite.snapshotPdfPath) && (
+            {activeSite.snapshotHtml && (
               <div className="annotation-toolbar">
                 <button
                   type="button"
@@ -1308,12 +1049,12 @@ function App() {
             <div className="read-later-heading">
               <div>
                 <p className="section-kicker">No snapshot</p>
-                <h2 className="section-title">Read later</h2>
+                <h2 className="section-title">Bookmarks</h2>
               </div>
               <button
                 type="button"
                 className="read-later-close"
-                aria-label="Close Read later"
+                aria-label="Close Bookmarks"
                 onClick={() => setIsReadLaterOpen(false)}
               >
                 Close
@@ -1325,22 +1066,22 @@ function App() {
                 value={readLaterTitleInput}
                 onChange={(event) => setReadLaterTitleInput(event.target.value)}
                 placeholder="Title (optional)"
-                aria-label="Read later title"
+                aria-label="Bookmarks title"
               />
               <input
                 type="url"
                 value={readLaterUrlInput}
                 onChange={(event) => setReadLaterUrlInput(event.target.value)}
                 placeholder="https://example.com"
-                aria-label="Read later URL"
+                aria-label="Bookmarks URL"
               />
               <button type="button" onClick={handleSaveForLater} disabled={isBusy}>
-                Add to list
+                Add bookmark
               </button>
             </div>
             <div className="read-later-list">
               {readLaterItems.length === 0 ? (
-                <p className="read-later-empty">No links saved for later.</p>
+                <p className="read-later-empty">No bookmarks saved yet.</p>
               ) : (
                 readLaterItems.map((item) => (
                   <div key={item.id} className="read-later-item">
@@ -1355,7 +1096,7 @@ function App() {
                     <button
                       type="button"
                       className="read-later-remove"
-                      aria-label={`Remove ${item.title} from Read later`}
+                      aria-label={`Remove ${item.title} from Bookmarks`}
                       onClick={() => removeReadLaterItem(item)}
                     >
                       Remove
@@ -1400,7 +1141,7 @@ function App() {
               + Add New Topic
             </button>
             <button className="read-later-sidebar-button" onClick={() => setIsReadLaterOpen(true)}>
-              Read later <span>{readLaterItems.length}</span>
+              Bookmarks <span>{readLaterItems.length}</span>
             </button>
             {topics.length === 0 && !selectedTopic && (
               <button className="topic-item general-topic" onClick={() => setSelectedTopic('')}>
@@ -1461,16 +1202,6 @@ function App() {
               >
                 {isBusy ? 'Saving...' : 'Save'}
               </button>
-              <label className="pdf-upload-button">
-                <input
-                  ref={pdfFileInputRef}
-                  type="file"
-                  accept="application/pdf,.pdf"
-                  onChange={handlePdfUpload}
-                  disabled={isBusy}
-                />
-                {selectedTopic ? `Upload PDF to ${selectedTopic}` : 'Select a topic to upload PDF'}
-              </label>
             </div>
             {websiteError && <p className="error-text">{websiteError}</p>}
             {websiteNotice && <p className="success-text">{websiteNotice}</p>}
