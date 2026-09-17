@@ -306,7 +306,8 @@ select {
   font-weight: 700;
 }
 
-.pdf-upload-button {
+.html-upload-button {
+  grid-column: 1 / -1;
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -320,11 +321,11 @@ select {
   cursor: pointer;
 }
 
-.pdf-upload-button:hover {
+.html-upload-button:hover {
   background: #dcecff;
 }
 
-.pdf-upload-button input {
+.html-upload-button input {
   position: absolute;
   width: 1px;
   height: 1px;
@@ -710,41 +711,6 @@ select {
   border: none;
   min-height: 400px;
   display: block;
-}
-
-.pdf-annotation-viewer {
-  height: 100%;
-  overflow: auto;
-  padding: 1rem;
-  background: #202124;
-}
-
-.pdf-page {
-  position: relative;
-  width: fit-content;
-  max-width: 100%;
-  margin: 0 auto 1rem;
-  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.34);
-}
-
-.pdf-page > canvas {
-  display: block;
-  max-width: 100%;
-  height: auto;
-}
-
-.pdf-annotation-layer {
-  position: absolute;
-  inset: 0;
-  width: 100%;
-  height: 100%;
-  pointer-events: none;
-}
-
-.pdf-annotation-layer.drawing {
-  pointer-events: auto;
-  cursor: crosshair;
-  touch-action: none;
 }
 
 .snapshot-unavailable {

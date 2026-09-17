@@ -1,0 +1,199 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Marker Pen Bookmarklet</title>
+  <style>
+    body {
+      font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      max-width: 720px;
+      margin: 48px auto;
+      padding: 0 24px;
+      line-height: 1.5;
+      color: #111827;
+    }
+    h1 { font-size: 1.5rem; margin-bottom: 0.5rem; }
+    code {
+      background: #f3f4f6;
+      padding: 2px 6px;
+      border-radius: 4px;
+      font-size: 0.9rem;
+    }
+    #bm {
+      display: inline-block;
+      padding: 10px 16px;
+      background: #ef4444;
+      color: #fff;
+      border-radius: 8px;
+      text-decoration: none;
+      font-weight: 600;
+      margin: 12px 0;
+    }
+    #bm:hover { background: #dc2626; }
+    textarea {
+      width: 100%;
+      min-height: 120px;
+      font-family: monospace;
+      font-size: 0.85rem;
+      padding: 10px;
+      border: 1px solid #d1d5db;
+      border-radius: 6px;
+      box-sizing: border-box;
+    }
+  </style>
+</head>
+<body>
+  <h1>Marker Pen Bookmarklet</h1>
+  <p>Drag the red link below to your Chrome bookmarks bar, then click it on any page to draw or underline.</p>
+  <p><a id="bm" href="#" draggable="true">✎ Marker Pen</a></p>
+  <p>Or copy this URL and create a new bookmark manually:</p>
+  <textarea id="code" readonly></textarea>
+
+  <script type="text/plain" id="bmsrc">
+(() => {
+  if (window.__mpMarker) return;
+  window.__mpMarker = 1;
+
+  const style = document.createElement('style');
+  style.textContent = `
+    body{position:relative}
+    .mpm-btn{position:fixed;bottom:20px;right:20px;width:44px;height:44px;border-radius:50%;background:#ef4444;color:#fff;border:none;font-size:20px;cursor:pointer;box-shadow:0 2px 10px rgba(0,0,0,.2);z-index:2147483647;display:flex;align-items:center;justify-content:center}
+    .mpm-btn:hover{background:#dc2626}
+    .mpm-panel{position:fixed;bottom:75px;right:20px;width:260px;background:#fff;border:1px solid #ddd;border-radius:10px;box-shadow:0 4px 20px rgba(0,0,0,.15);z-index:2147483647;display:none;flex-direction:column;overflow:hidden;font-family:system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}
+    .mpm-panel.open{display:flex}
+    .mpm-header{padding:8px 12px;background:#f6f8fa;border-bottom:1px solid #eee;font-weight:600;font-size:13px;display:flex;justify-content:space-between;align-items:center}
+    .mpm-header button{background:none;border:none;cursor:pointer;font-size:14px;color:#666}
+    .mpm-header button:hover{color:#111827}
+    .mpm-tools{display:flex;gap:8px;align-items:center;padding:10px 12px;border-bottom:1px solid #eee;font-size:12px;flex-wrap:wrap}
+    .mpm-dots{display:flex;align-items:center;gap:8px}
+    .mpm-dot{width:22px;height:22px;border-radius:999px;border:2px solid #d1d5db;cursor:pointer}
+    .mpm-dot.active{border-color:#111827}
+    .mpm-mode{flex:0 0 auto;background:#f3f4f6;border:1px solid #ddd;border-radius:6px;padding:4px 8px;cursor:pointer;font-size:12px}
+    .mpm-mode.active{background:#111827;color:#fff;border-color:#111827}
+    .mpm-tools input[type="range"]{width:90px}
+    .mpm-overlay{position:absolute;top:0;left:0;z-index:2147483646;pointer-events:none}
+    .mpm-overlay.active{pointer-events:auto;cursor:crosshair}
+    .mpm-overlay canvas{width:100%;height:100%;display:block;touch-action:none}
+    ::selection{background:rgba(239,68,68,.25)}
+  `;
+  document.head.appendChild(style);
+
+  const root = document.createElement('div');
+  root.innerHTML = `
+    <button class="mpm-btn" title="Marker Pen">✎</button>
+    <div class="mpm-panel">
+      <div class="mpm-header"><span>Marker Pen</span><div><button data-act="clear" title="Clear">🗑</button><button data-act="close" title="Close">✕</button></div></div>
+      <div class="mpm-tools">
+        <label>Size <input class="mpm-size" type="range" min="1" max="18" value="4"></label>
+        <div class="mpm-dots">
+          <span class="mpm-dot active" data-color="#ef4444" style="background:#ef4444" title="Red"></span>
+          <span class="mpm-dot" data-color="#facc15" style="background:#facc15" title="Yellow"></span>
+          <span class="mpm-dot" data-color="#22c55e" style="background:#22c55e" title="Green"></span>
+          <span class="mpm-dot" data-color="#111827" style="background:#111827" title="Black"></span>
+        </div>
+        <button class="mpm-mode mpm-marker active" data-mode="marker">Pen</button>
+        <button class="mpm-mode mpm-underline" data-mode="underline">Underline</button>
+      </div>
+    </div>
+    <div class="mpm-overlay"><canvas></canvas></div>
+  `;
+  document.body.appendChild(root);
+
+  const btn = root.querySelector('.mpm-btn');
+  const panel = root.querySelector('.mpm-panel');
+  const overlay = root.querySelector('.mpm-overlay');
+  const canvas = root.querySelector('canvas');
+  const ctx = canvas.getContext('2d');
+  const sizeInput = root.querySelector('.mpm-size');
+  const modeBtns = Array.from(root.querySelectorAll('.mpm-mode'));
+  const dotBtns = Array.from(root.querySelectorAll('.mpm-dot'));
+
+  let active = false, drawing = false, color = '#ef4444', mode = 'marker', strokes = [], current = null;
+  const setColor = (next) => {
+    color = next;
+    dotBtns.forEach(d => d.classList.toggle('active', d.dataset.color === color));
+  };
+  const key = () => `mpm:${location.pathname}${location.search}`;
+  const save = () => localStorage.setItem(key(), JSON.stringify(strokes));
+  const load = () => {
+    try { strokes = JSON.parse(localStorage.getItem(key()) || '[]'); } catch { strokes = []; }
+    drawAll();
+  };
+  const resize = () => {
+    const w = Math.max(document.documentElement.scrollWidth, document.documentElement.clientWidth);
+    const h = Math.max(document.documentElement.scrollHeight, document.documentElement.clientHeight);
+    canvas.width = w; canvas.height = h;
+    overlay.style.width = w + 'px'; overlay.style.height = h + 'px';
+    drawAll();
+  };
+  const drawAll = () => {
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    ctx.lineCap = 'round'; ctx.lineJoin = 'round';
+    strokes.forEach(s => {
+      if (!s.points || s.points.length < 2) return;
+      ctx.strokeStyle = s.color; ctx.lineWidth = s.size;
+      ctx.beginPath(); ctx.moveTo(s.points[0].x, s.points[0].y);
+      for (let i = 1; i < s.points.length; i++) ctx.lineTo(s.points[i].x, s.points[i].y);
+      ctx.stroke();
+    });
+  };
+  const setMode = (next) => {
+    mode = next;
+    modeBtns.forEach(b => b.classList.toggle('active', b.dataset.mode === mode));
+    overlay.classList.toggle('active', active && mode === 'marker');
+  };
+  const setActive = (next) => {
+    active = next; panel.classList.toggle('open', active);
+    overlay.classList.toggle('active', active && mode === 'marker');
+  };
+  const pt = (e) => ({ x: e.pageX, y: e.pageY });
+  const start = (e) => { if (!active || mode !== 'marker') return; e.preventDefault(); drawing = true; current = { color, size: +sizeInput.value, points: [pt(e)] }; };
+  const move = (e) => { if (!drawing || !active || mode !== 'marker') return; e.preventDefault(); current.points.push(pt(e)); const a = current.points[current.points.length - 2], b = current.points[current.points.length - 1]; ctx.strokeStyle = current.color; ctx.lineWidth = current.size; ctx.beginPath(); ctx.moveTo(a.x, a.y); ctx.lineTo(b.x, b.y); ctx.stroke(); };
+  const end = () => { if (drawing && current && current.points.length > 1) { strokes.push(current); save(); } drawing = false; current = null; };
+  const addUnderline = () => {
+    if (!active || mode !== 'underline') return;
+    const sel = window.getSelection();
+    if (!sel || sel.isCollapsed) return;
+    const range = sel.getRangeAt(0);
+    const rects = Array.from(range.getClientRects());
+    const sx = window.scrollX, sy = window.scrollY;
+    const size = +sizeInput.value;
+    rects.forEach(r => {
+      const y = r.bottom + sy + 2;
+      strokes.push({ color, size, points: [{ x: r.left + sx, y }, { x: r.right + sx, y }] });
+    });
+    save(); drawAll();
+    sel.removeAllRanges();
+  };
+
+  btn.onclick = () => setActive(!active);
+  root.querySelector('[data-act="close"]').onclick = () => setActive(false);
+  root.querySelector('[data-act="clear"]').onclick = () => { strokes = []; save(); drawAll(); };
+  sizeInput.oninput = () => (ctx.lineWidth = +sizeInput.value);
+  modeBtns.forEach(b => b.onclick = () => setMode(b.dataset.mode));
+  dotBtns.forEach(d => d.onclick = () => setColor(d.dataset.color));
+  canvas.addEventListener('mousedown', start);
+  canvas.addEventListener('mousemove', move);
+  window.addEventListener('mouseup', end);
+  window.addEventListener('mouseup', addUnderline);
+  canvas.addEventListener('mouseleave', end);
+  window.addEventListener('resize', resize);
+  document.addEventListener('keydown', (e) => { if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'z' && active && strokes.length) { strokes.pop(); save(); drawAll(); e.preventDefault(); } });
+  canvas.addEventListener('touchstart', (e) => { const t = e.touches[0]; if (!t) return; start({ pageX: t.pageX, pageY: t.pageY, preventDefault: () => e.preventDefault() }); }, { passive: false });
+  canvas.addEventListener('touchmove', (e) => { const t = e.touches[0]; if (!t) return; move({ pageX: t.pageX, pageY: t.pageY, preventDefault: () => e.preventDefault() }); }, { passive: false });
+  window.addEventListener('touchend', end);
+
+  resize();
+  load();
+})();
+  </script>
+
+  <script>
+    const src = document.getElementById('bmsrc').textContent;
+    const url = 'javascript:' + encodeURIComponent(src);
+    document.getElementById('bm').href = url;
+    document.getElementById('code').value = url;
+  </script>
+</body>
+</html>
