@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { Eraser, Pencil } from 'lucide-react';
+import { Eraser, Menu, Pencil } from 'lucide-react';
 import { supabase } from './lib/supabaseClient';
 
 const normalizeSiteName = (url) => {
@@ -66,6 +66,7 @@ function App() {
   const [searchQuery, setSearchQuery] = useState('');
   const [topics, setTopics] = useState([]);
   const [selectedTopic, setSelectedTopic] = useState('');
+  const [isTopicsSidebarOpen, setIsTopicsSidebarOpen] = useState(false);
   const [penEnabled, setPenEnabled] = useState(false);
   const [penMode, setPenMode] = useState('underline');
   const [penColor, setPenColor] = useState('#ef4444');
@@ -1216,6 +1217,16 @@ function App() {
       {/* Header */}
       <header className="app-header">
         <div className="header-left">
+          <button
+            type="button"
+            className="topics-toggle"
+            aria-expanded={isTopicsSidebarOpen}
+            aria-controls="topics-sidebar"
+            onClick={() => setIsTopicsSidebarOpen((isOpen) => !isOpen)}
+          >
+            <Menu size={18} strokeWidth={2} aria-hidden="true" />
+            Topics
+          </button>
           <h1 className="app-title">YOUR CURATED TECHNICAL CACHE</h1>
         </div>
         <div className="header-search">
@@ -1238,7 +1249,8 @@ function App() {
 
       <div className="app-container">
         {/* Sidebar with topics */}
-        <aside className="app-sidebar">
+        {isTopicsSidebarOpen && (
+        <aside id="topics-sidebar" className="app-sidebar">
           <div className="sidebar-section">
             <h3 className="sidebar-title">TOPICS</h3>
             <button className="topic-item add-topic-btn" onClick={addTopic}>
@@ -1264,6 +1276,7 @@ function App() {
             ))}
           </div>
         </aside>
+        )}
 
         {/* Main content */}
         <main className="app-main">
