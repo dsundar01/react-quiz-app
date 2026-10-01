@@ -440,6 +440,45 @@ select {
   background: white;
 }
 
+.read-later-drag-handle {
+  flex: 0 0 1rem;
+  color: var(--subtle);
+  cursor: grab;
+  font-size: 1.2rem;
+  line-height: 1;
+  user-select: none;
+}
+
+.read-later-item.dragging {
+  opacity: 0.55;
+}
+
+.read-later-item > div {
+  min-width: 0;
+  flex: 1;
+}
+
+.read-later-notes {
+  display: block;
+  width: 100%;
+  min-height: 72px;
+  margin-top: 0.65rem;
+  padding: 0.55rem 0.65rem;
+  resize: vertical;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--card);
+  color: var(--ink);
+  font: inherit;
+  font-size: 0.82rem;
+}
+
+.read-later-save-notes {
+  margin-top: 0.45rem;
+  padding: 0.35rem 0.6rem;
+  font-size: 0.75rem;
+}
+
 .read-later-item a {
   color: var(--ink);
   font-weight: 700;
@@ -768,7 +807,8 @@ html[data-theme='dark'] body {
 }
 
 html[data-theme='dark'] select,
-html[data-theme='dark'] input {
+html[data-theme='dark'] input,
+html[data-theme='dark'] textarea {
   background: #0f172a;
   color: var(--ink);
 }

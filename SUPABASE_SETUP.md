@@ -91,15 +91,21 @@ using (bucket_id = 'website-snapshots');
 
 ## 5) Create the Read later table
 
-Run this SQL in Supabase SQL Editor. Read later links store only the URL and title; no website snapshot is created.
+Run this SQL in Supabase SQL Editor. Read later links store the URL, title, notes, and custom display order; no website snapshot is created.
 
 ```sql
 create table if not exists public.read_later_items (
   id uuid primary key default gen_random_uuid(),
   title text not null,
   url text not null,
+  notes text not null default '',
+  sort_order integer not null default 0,
   created_at timestamptz not null default now()
 );
+
+alter table public.read_later_items
+  add column if not exists notes text not null default '',
+  add column if not exists sort_order integer not null default 0;
 
 alter table public.read_later_items enable row level security;
 
@@ -111,6 +117,9 @@ on public.read_later_items for insert with check (true);
 
 create policy "delete read later items"
 on public.read_later_items for delete using (true);
+
+create policy "update read later items"
+on public.read_later_items for update using (true) with check (true);
 ```
 
 ## 6) Create the topics table

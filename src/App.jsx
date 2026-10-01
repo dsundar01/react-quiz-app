@@ -25,6 +25,8 @@ const mapReadLaterItem = (item) => ({
   id: item.id,
   title: item.title || normalizeSiteName(item.url),
   url: item.url,
+  notes: item.notes || '',
+  sortOrder: item.sort_order ?? null,
   createdAt: item.created_at,
 });
 
@@ -59,6 +61,7 @@ function App() {
   const [readLaterUrlInput, setReadLaterUrlInput] = useState('');
   const [readLaterItems, setReadLaterItems] = useState([]);
   const [isReadLaterOpen, setIsReadLaterOpen] = useState(false);
+  const [draggedReadLaterId, setDraggedReadLaterId] = useState('');
   const [isDarkMode, setIsDarkMode] = useState(
     () => window.localStorage.getItem('website-cache-dark-mode') === 'true',
   );
@@ -162,7 +165,8 @@ function App() {
       }
       const { data: readLaterData, error: readLaterError } = await supabase
         .from('read_later_items')
-        .select('id, title, url, created_at')
+        .select('id, title, url, notes, sort_order, created_at')
+        .order('sort_order', { ascending: true, nullsFirst: false })
         .order('created_at', { ascending: false });
 
       if (readLaterError) {
@@ -382,10 +386,14 @@ function App() {
 
     setIsBusy(true);
     setWebsiteError('');
+    const nextSortOrder = readLaterItems.reduce(
+      (lowestOrder, item) => Math.min(lowestOrder, item.sortOrder ?? 0),
+      0,
+    ) - 1;
     const { data, error } = await supabase
       .from('read_later_items')
-      .insert({ title: trimmedTitle || normalizeSiteName(url), url })
-      .select('id, title, url, created_at')
+      .insert({ title: trimmedTitle || normalizeSiteName(url), url, notes: '', sort_order: nextSortOrder })
+      .select('id, title, url, notes, sort_order, created_at')
       .single();
 
     if (error) {
@@ -399,6 +407,52 @@ function App() {
     setReadLaterUrlInput('');
     setWebsiteNotice('Added to Bookmarks.');
     setIsBusy(false);
+  };
+
+  const saveReadLaterNotes = async (item) => {
+    if (!supabase) {
+      setWebsiteError('Supabase is not configured. The note was not saved.');
+      return;
+    }
+
+    const { error } = await supabase
+      .from('read_later_items')
+      .update({ notes: item.notes || '' })
+      .eq('id', item.id);
+
+    if (error) {
+      setWebsiteError(`Unable to save bookmark notes: ${error.message}`);
+      return;
+    }
+    setWebsiteNotice('Bookmark notes saved.');
+  };
+
+  const reorderReadLaterItems = async (event, targetItem) => {
+    event.preventDefault();
+    const draggedId = event.dataTransfer.getData('text/plain') || draggedReadLaterId;
+    if (!draggedId || draggedId === targetItem.id) return;
+
+    const draggedIndex = readLaterItems.findIndex((item) => item.id === draggedId);
+    const targetIndex = readLaterItems.findIndex((item) => item.id === targetItem.id);
+    if (draggedIndex < 0 || targetIndex < 0) return;
+
+    const reorderedItems = [...readLaterItems];
+    const [draggedItem] = reorderedItems.splice(draggedIndex, 1);
+    reorderedItems.splice(targetIndex, 0, draggedItem);
+    setReadLaterItems(reorderedItems);
+    setDraggedReadLaterId('');
+
+    const updates = await Promise.all(
+      reorderedItems.map((item, index) =>
+        supabase.from('read_later_items').update({ sort_order: index }).eq('id', item.id),
+      ),
+    );
+    const failedUpdate = updates.find(({ error }) => error);
+    if (failedUpdate) {
+      setWebsiteError(`Unable to save bookmark order: ${failedUpdate.error.message}`);
+      return;
+    }
+    setWebsiteNotice('Bookmark order saved.');
   };
 
   const removeReadLaterItem = async (item) => {
@@ -1197,7 +1251,20 @@ function App() {
                 <p className="read-later-empty">No bookmarks saved yet.</p>
               ) : (
                 readLaterItems.map((item) => (
-                  <div key={item.id} className="read-later-item">
+                  <div
+                    key={item.id}
+                    className={`read-later-item ${draggedReadLaterId === item.id ? 'dragging' : ''}`}
+                    draggable
+                    onDragStart={(event) => {
+                      event.dataTransfer.effectAllowed = 'move';
+                      event.dataTransfer.setData('text/plain', item.id);
+                      setDraggedReadLaterId(item.id);
+                    }}
+                    onDragEnd={() => setDraggedReadLaterId('')}
+                    onDragOver={(event) => event.preventDefault()}
+                    onDrop={(event) => reorderReadLaterItems(event, item)}
+                  >
+                    <span className="read-later-drag-handle" aria-hidden="true">&#8942;</span>
                     <div>
                       <a href={item.url} target="_blank" rel="noreferrer">
                         {item.title}
@@ -1205,6 +1272,28 @@ function App() {
                       <a className="read-later-url" href={item.url} target="_blank" rel="noreferrer">
                         {item.url}
                       </a>
+                      <textarea
+                        className="read-later-notes"
+                        value={item.notes}
+                        placeholder="Add notes..."
+                        aria-label={`Notes for ${item.title}`}
+                        onChange={(event) => {
+                          const notes = event.target.value;
+                          setReadLaterItems((previous) =>
+                            previous.map((savedItem) =>
+                              savedItem.id === item.id ? { ...savedItem, notes } : savedItem,
+                            ),
+                          );
+                        }}
+                        onClick={(event) => event.stopPropagation()}
+                      />
+                      <button
+                        type="button"
+                        className="read-later-save-notes"
+                        onClick={() => saveReadLaterNotes(item)}
+                      >
+                        Save notes
+                      </button>
                     </div>
                     <button
                       type="button"
