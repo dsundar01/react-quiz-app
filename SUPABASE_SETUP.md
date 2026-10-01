@@ -21,6 +21,8 @@ create table if not exists public.saved_websites (
   snapshot_pdf_path text,
   snapshot_created_at timestamptz,
   annotations jsonb not null default '[]'::jsonb,
+  notes text not null default '',
+  sort_order integer not null default 0,
   created_at timestamptz not null default now()
 );
 ```
@@ -32,7 +34,9 @@ alter table public.saved_websites
   add column if not exists snapshot_html text,
   add column if not exists snapshot_pdf_path text,
   add column if not exists snapshot_created_at timestamptz,
-  add column if not exists annotations jsonb not null default '[]'::jsonb;
+  add column if not exists annotations jsonb not null default '[]'::jsonb,
+  add column if not exists notes text not null default '',
+  add column if not exists sort_order integer not null default 0;
 ```
 
 If the app reports that `saved_websites.snapshot_pdf_path` does not exist, run this migration in Supabase SQL Editor and reload the app:
@@ -91,15 +95,23 @@ using (bucket_id = 'website-snapshots');
 
 ## 5) Create the Read later table
 
-Run this SQL in Supabase SQL Editor. Read later links store only the URL and title; no website snapshot is created.
+Run this SQL in Supabase SQL Editor. Read later links store the URL, title, topic, notes, and custom display order; no website snapshot is created.
 
 ```sql
 create table if not exists public.read_later_items (
   id uuid primary key default gen_random_uuid(),
   title text not null,
   url text not null,
+  topic text not null default 'General',
+  notes text not null default '',
+  sort_order integer not null default 0,
   created_at timestamptz not null default now()
 );
+
+alter table public.read_later_items
+  add column if not exists topic text not null default 'General',
+  add column if not exists notes text not null default '',
+  add column if not exists sort_order integer not null default 0;
 
 alter table public.read_later_items enable row level security;
 
@@ -111,6 +123,9 @@ on public.read_later_items for insert with check (true);
 
 create policy "delete read later items"
 on public.read_later_items for delete using (true);
+
+create policy "update read later items"
+on public.read_later_items for update using (true) with check (true);
 ```
 
 ## 6) Create the topics table

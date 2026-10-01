@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { Eraser, Menu, Pencil } from 'lucide-react';
+import { Eraser, Menu, Moon, Pencil, Sun } from 'lucide-react';
 import { supabase } from './lib/supabaseClient';
 
 const normalizeSiteName = (url) => {
@@ -7,6 +7,17 @@ const normalizeSiteName = (url) => {
     return new URL(url).hostname.replace(/^www\./i, '');
   } catch {
     return 'Saved website';
+  }
+};
+
+const formatReadLaterUrl = (url) => {
+  try {
+    const parsedUrl = new URL(url);
+    const hostname = parsedUrl.hostname.replace(/^www\./i, '');
+    const path = parsedUrl.pathname === '/' ? '' : parsedUrl.pathname;
+    return `${hostname}${path}${parsedUrl.search}${parsedUrl.hash}`;
+  } catch {
+    return url.replace(/^https?:\/\/(www\.)?/i, '');
   }
 };
 
@@ -18,6 +29,8 @@ const mapSupabaseSite = (item) => ({
   snapshotHtml: item.snapshot_html,
   snapshotCreatedAt: item.snapshot_created_at,
   annotations: Array.isArray(item.annotations) ? item.annotations : [],
+  notes: item.notes || '',
+  sortOrder: item.sort_order ?? null,
   createdAt: item.created_at,
 });
 
@@ -25,6 +38,9 @@ const mapReadLaterItem = (item) => ({
   id: item.id,
   title: item.title || normalizeSiteName(item.url),
   url: item.url,
+  topic: item.topic || 'General',
+  notes: item.notes || '',
+  sortOrder: item.sort_order ?? null,
   createdAt: item.created_at,
 });
 
@@ -57,8 +73,17 @@ function App() {
   const [cachedWebsites, setCachedWebsites] = useState([]);
   const [readLaterTitleInput, setReadLaterTitleInput] = useState('');
   const [readLaterUrlInput, setReadLaterUrlInput] = useState('');
+  const [readLaterTopicInput, setReadLaterTopicInput] = useState('');
   const [readLaterItems, setReadLaterItems] = useState([]);
   const [isReadLaterOpen, setIsReadLaterOpen] = useState(false);
+  const [draggedReadLaterId, setDraggedReadLaterId] = useState('');
+  const [expandedReadLaterId, setExpandedReadLaterId] = useState('');
+  const [editingReadLaterId, setEditingReadLaterId] = useState('');
+  const [readLaterEditTitle, setReadLaterEditTitle] = useState('');
+  const [readLaterEditTopic, setReadLaterEditTopic] = useState('');
+  const [isDarkMode, setIsDarkMode] = useState(
+    () => window.localStorage.getItem('website-cache-dark-mode') === 'true',
+  );
   const [activeSiteId, setActiveSiteId] = useState('');
   const [websiteNotice, setWebsiteNotice] = useState('');
   const [websiteError, setWebsiteError] = useState('');
@@ -67,6 +92,11 @@ function App() {
   const [topics, setTopics] = useState([]);
   const [selectedTopic, setSelectedTopic] = useState('');
   const [isTopicsSidebarOpen, setIsTopicsSidebarOpen] = useState(false);
+  const [editingSiteId, setEditingSiteId] = useState('');
+  const [siteEditTitle, setSiteEditTitle] = useState('');
+  const [siteEditTopic, setSiteEditTopic] = useState('');
+  const [draggedSiteId, setDraggedSiteId] = useState('');
+  const [expandedSiteNotesId, setExpandedSiteNotesId] = useState('');
   const [penEnabled, setPenEnabled] = useState(false);
   const [penMode, setPenMode] = useState('underline');
   const [penColor, setPenColor] = useState('#ef4444');
@@ -100,6 +130,11 @@ function App() {
     };
   }, [penColor, penEnabled, penMode, penSize]);
 
+  useEffect(() => {
+    document.documentElement.dataset.theme = isDarkMode ? 'dark' : 'light';
+    window.localStorage.setItem('website-cache-dark-mode', String(isDarkMode));
+  }, [isDarkMode]);
+
   // Filter websites by search and topic 
   const filteredWebsites = cachedWebsites.filter((site) => {
     const matchesSearch =
@@ -109,10 +144,30 @@ function App() {
     return matchesSearch && matchesTopic;
   });
 
-  // Sort by most recent first
+  const filteredReadLaterItems = readLaterItems.filter((item) => {
+    const normalizedSearch = searchQuery.toLowerCase();
+    const matchesSearch =
+      item.title.toLowerCase().includes(normalizedSearch) ||
+      item.url.toLowerCase().includes(normalizedSearch);
+    const matchesTopic = !readLaterTopicInput || item.topic === readLaterTopicInput;
+    return matchesSearch && matchesTopic;
+  });
+
+  // Keep custom order first, with older rows falling back to recency.
   const sortedWebsites = [...filteredWebsites].sort(
-    (a, b) => new Date(b.createdAt) - new Date(a.createdAt),
+    (a, b) => {
+      if (a.sortOrder !== null && b.sortOrder !== null) return a.sortOrder - b.sortOrder;
+      if (a.sortOrder !== null) return -1;
+      if (b.sortOrder !== null) return 1;
+      return new Date(b.createdAt) - new Date(a.createdAt);
+    },
   );
+
+  const getNextSiteSortOrder = () =>
+    cachedWebsites.reduce(
+      (lowestOrder, site) => Math.min(lowestOrder, site.sortOrder ?? 0),
+      0,
+    ) - 1;
 
   useEffect(() => {
     const loadSites = async () => {
@@ -128,7 +183,8 @@ function App() {
 
       const { data, error } = await supabase
         .from('saved_websites')
-        .select('id, title, url, topic, snapshot_html, snapshot_created_at, annotations, created_at')
+        .select('id, title, url, topic, snapshot_html, snapshot_created_at, annotations, notes, sort_order, created_at')
+        .order('sort_order', { ascending: true, nullsFirst: false })
         .order('created_at', { ascending: false });
 
       if (error) {
@@ -154,7 +210,8 @@ function App() {
       }
       const { data: readLaterData, error: readLaterError } = await supabase
         .from('read_later_items')
-        .select('id, title, url, created_at')
+        .select('id, title, url, topic, notes, sort_order, created_at')
+        .order('sort_order', { ascending: true, nullsFirst: false })
         .order('created_at', { ascending: false });
 
       if (readLaterError) {
@@ -216,8 +273,8 @@ function App() {
     if (supabase) {
       const { data, error } = await supabase
         .from('saved_websites')
-        .insert({ title, url: normalizedUrl, topic })
-        .select('id, title, url, topic, snapshot_html, snapshot_created_at, annotations, created_at')
+        .insert({ title, url: normalizedUrl, topic, notes: '', sort_order: getNextSiteSortOrder() })
+        .select('id, title, url, topic, snapshot_html, snapshot_created_at, annotations, notes, sort_order, created_at')
         .single();
 
       if (error) {
@@ -243,7 +300,7 @@ function App() {
       } else {
         const { data: storedSite, error: storedSiteError } = await supabase
           .from('saved_websites')
-          .select('id, title, url, topic, snapshot_html, snapshot_created_at, annotations, created_at')
+          .select('id, title, url, topic, snapshot_html, snapshot_created_at, annotations, notes, sort_order, created_at')
           .eq('id', savedSite.id)
           .single();
         if (storedSiteError) {
@@ -313,8 +370,8 @@ function App() {
 
     const { data: savedRecord, error: insertError } = await supabase
       .from('saved_websites')
-      .insert({ title, url, topic })
-      .select('id, title, url, topic, snapshot_html, snapshot_created_at, annotations, created_at')
+      .insert({ title, url, topic, notes: '', sort_order: getNextSiteSortOrder() })
+      .select('id, title, url, topic, snapshot_html, snapshot_created_at, annotations, notes, sort_order, created_at')
       .single();
 
     if (insertError) {
@@ -327,7 +384,7 @@ function App() {
       .from('saved_websites')
       .update({ snapshot_html: snapshotHtml, snapshot_created_at: new Date().toISOString() })
       .eq('id', savedRecord.id)
-      .select('id, title, url, topic, snapshot_html, snapshot_created_at, annotations, created_at')
+      .select('id, title, url, topic, snapshot_html, snapshot_created_at, annotations, notes, sort_order, created_at')
       .single();
 
     if (updateError) {
@@ -374,10 +431,20 @@ function App() {
 
     setIsBusy(true);
     setWebsiteError('');
+    const nextSortOrder = readLaterItems.reduce(
+      (lowestOrder, item) => Math.min(lowestOrder, item.sortOrder ?? 0),
+      0,
+    ) - 1;
     const { data, error } = await supabase
       .from('read_later_items')
-      .insert({ title: trimmedTitle || normalizeSiteName(url), url })
-      .select('id, title, url, created_at')
+      .insert({
+        title: trimmedTitle || normalizeSiteName(url),
+        url,
+        topic: readLaterTopicInput || 'General',
+        notes: '',
+        sort_order: nextSortOrder,
+      })
+      .select('id, title, url, topic, notes, sort_order, created_at')
       .single();
 
     if (error) {
@@ -389,8 +456,98 @@ function App() {
     setReadLaterItems((previous) => [mapReadLaterItem(data), ...previous]);
     setReadLaterTitleInput('');
     setReadLaterUrlInput('');
+    setReadLaterTopicInput('');
     setWebsiteNotice('Added to Bookmarks.');
     setIsBusy(false);
+  };
+
+  const saveReadLaterNotes = async (item) => {
+    if (!supabase) {
+      setWebsiteError('Supabase is not configured. The note was not saved.');
+      return;
+    }
+
+    const { error } = await supabase
+      .from('read_later_items')
+      .update({ notes: item.notes || '' })
+      .eq('id', item.id);
+
+    if (error) {
+      setWebsiteError(`Unable to save bookmark notes: ${error.message}`);
+      return;
+    }
+    setWebsiteNotice('Bookmark notes saved.');
+  };
+
+  const startEditingReadLater = (item) => {
+    setEditingReadLaterId(item.id);
+    setReadLaterEditTitle(item.title);
+    setReadLaterEditTopic(item.topic);
+  };
+
+  const cancelEditingReadLater = () => {
+    setEditingReadLaterId('');
+    setReadLaterEditTitle('');
+    setReadLaterEditTopic('');
+  };
+
+  const saveReadLaterDetails = async (item) => {
+    const title = readLaterEditTitle.trim();
+    if (!title) {
+      setWebsiteError('Please enter a bookmark title.');
+      return;
+    }
+    if (!supabase) {
+      setWebsiteError('Supabase is not configured. The bookmark was not updated.');
+      return;
+    }
+
+    const { error } = await supabase
+      .from('read_later_items')
+      .update({ title, topic: readLaterEditTopic || 'General' })
+      .eq('id', item.id);
+
+    if (error) {
+      setWebsiteError(`Unable to update bookmark: ${error.message}`);
+      return;
+    }
+    setReadLaterItems((previous) =>
+      previous.map((savedItem) =>
+        savedItem.id === item.id
+          ? { ...savedItem, title, topic: readLaterEditTopic || 'General' }
+          : savedItem,
+      ),
+    );
+    cancelEditingReadLater();
+    setWebsiteNotice('Bookmark updated.');
+  };
+
+  const reorderReadLaterItems = async (event, targetItem) => {
+    event.preventDefault();
+    const draggedId = event.dataTransfer.getData('text/plain') || draggedReadLaterId;
+    if (!draggedId || draggedId === targetItem.id) return;
+
+    const draggedIndex = readLaterItems.findIndex((item) => item.id === draggedId);
+    const targetIndex = readLaterItems.findIndex((item) => item.id === targetItem.id);
+    if (draggedIndex < 0 || targetIndex < 0) return;
+
+    const reorderedItems = [...readLaterItems];
+    const [draggedItem] = reorderedItems.splice(draggedIndex, 1);
+    reorderedItems.splice(targetIndex, 0, draggedItem);
+    setReadLaterItems(reorderedItems);
+    setDraggedReadLaterId('');
+
+    const updates = await Promise.all(
+      reorderedItems.map((item, index) =>
+        supabase.from('read_later_items').update({ sort_order: index }).eq('id', item.id),
+      ),
+    );
+    const failedUpdate = updates.find(({ error }) => error);
+    if (failedUpdate) {
+      setWebsiteError(`Unable to save bookmark order: ${failedUpdate.error.message}`);
+      return;
+    }
+    setWebsiteNotice('Bookmark order saved.');
   };
 
   const removeReadLaterItem = async (item) => {
@@ -426,7 +583,7 @@ function App() {
 
     const { data: storedSite, error: storedSiteError } = await supabase
       .from('saved_websites')
-      .select('id, title, url, topic, snapshot_html, snapshot_created_at, annotations, created_at')
+      .select('id, title, url, topic, snapshot_html, snapshot_created_at, annotations, notes, sort_order, created_at')
       .eq('id', site.id)
       .single();
 
@@ -444,27 +601,103 @@ function App() {
     setIsBusy(false);
   };
 
-  const editWebsiteTitle = async (site) => {
-    const title = window.prompt('Edit article title:', site.title)?.trim();
-    if (!title || title === site.title) return;
+  const startEditingWebsite = (site) => {
+    setEditingSiteId(site.id);
+    setSiteEditTitle(site.title);
+    setSiteEditTopic(site.topic);
+  };
+
+  const cancelEditingWebsite = () => {
+    setEditingSiteId('');
+    setSiteEditTitle('');
+    setSiteEditTopic('');
+  };
+
+  const saveWebsiteDetails = async (site) => {
+    const title = siteEditTitle.trim();
+    const topic = siteEditTopic || 'General';
+    if (!title) {
+      setWebsiteError('Please enter an article title.');
+      return;
+    }
+    if (title === site.title && topic === site.topic) {
+      cancelEditingWebsite();
+      return;
+    }
     if (!supabase) {
-      setWebsiteError('Supabase is not configured. The title was not updated.');
+      setWebsiteError('Supabase is not configured. The article was not updated.');
       return;
     }
 
     setIsBusy(true);
-    const { error } = await supabase.from('saved_websites').update({ title }).eq('id', site.id);
+    const { error } = await supabase
+      .from('saved_websites')
+      .update({ title, topic })
+      .eq('id', site.id);
     if (error) {
-      setWebsiteError(`Unable to update title: ${error.message}`);
+      setWebsiteError(`Unable to update article: ${error.message}`);
       setIsBusy(false);
       return;
     }
 
     setCachedWebsites((previous) =>
-      previous.map((cachedSite) => (cachedSite.id === site.id ? { ...cachedSite, title } : cachedSite)),
+      previous.map((cachedSite) =>
+        cachedSite.id === site.id ? { ...cachedSite, title, topic } : cachedSite,
+      ),
     );
-    setWebsiteNotice('Article title updated.');
+    cancelEditingWebsite();
+    setWebsiteNotice('Article updated.');
     setIsBusy(false);
+  };
+
+  const saveWebsiteNotes = async (site) => {
+    if (!supabase) {
+      setWebsiteError('Supabase is not configured. The note was not saved.');
+      return;
+    }
+
+    const { error } = await supabase
+      .from('saved_websites')
+      .update({ notes: site.notes || '' })
+      .eq('id', site.id);
+
+    if (error) {
+      setWebsiteError(`Unable to save article notes: ${error.message}`);
+      return;
+    }
+    setWebsiteNotice('Article notes saved.');
+  };
+
+  const reorderWebsites = async (event, targetSite) => {
+    event.preventDefault();
+    const draggedId = event.dataTransfer.getData('text/plain') || draggedSiteId;
+    if (!draggedId || draggedId === targetSite.id) return;
+
+    const draggedIndex = cachedWebsites.findIndex((site) => site.id === draggedId);
+    const targetIndex = cachedWebsites.findIndex((site) => site.id === targetSite.id);
+    if (draggedIndex < 0 || targetIndex < 0) return;
+
+    const reorderedSites = [...cachedWebsites];
+    const [draggedSite] = reorderedSites.splice(draggedIndex, 1);
+    reorderedSites.splice(targetIndex, 0, draggedSite);
+    const orderedSites = reorderedSites.map((site, index) => ({
+      ...site,
+      sortOrder: index,
+    }));
+    setCachedWebsites(orderedSites);
+    setDraggedSiteId('');
+
+    const updates = await Promise.all(
+      orderedSites.map((site) =>
+        supabase.from('saved_websites').update({ sort_order: site.sortOrder }).eq('id', site.id),
+      ),
+    );
+    const failedUpdate = updates.find(({ error }) => error);
+    if (failedUpdate) {
+      setWebsiteError(`Unable to save article order: ${failedUpdate.error.message}`);
+      return;
+    }
+    setWebsiteNotice('Article order saved.');
   };
 
   const drawAnnotations = (annotations, temporaryLaser = null, temporaryLaserOpacity = 0) => {
@@ -1180,23 +1413,165 @@ function App() {
                 placeholder="https://example.com"
                 aria-label="Bookmarks URL"
               />
+              <select
+                className="read-later-topic-select"
+                value={readLaterTopicInput}
+                onChange={(event) => setReadLaterTopicInput(event.target.value)}
+                aria-label="Bookmark topic"
+              >
+                <option value="">All topics</option>
+                <option value="General">General</option>
+                {topics.map((topic) => (
+                  <option key={topic} value={topic}>
+                    {topic}
+                  </option>
+                ))}
+              </select>
               <button type="button" onClick={handleSaveForLater} disabled={isBusy}>
                 Add bookmark
               </button>
             </div>
             <div className="read-later-list">
-              {readLaterItems.length === 0 ? (
-                <p className="read-later-empty">No bookmarks saved yet.</p>
+              {filteredReadLaterItems.length === 0 ? (
+                <p className="read-later-empty">
+                  {readLaterItems.length === 0
+                    ? 'No bookmarks saved yet.'
+                    : 'No bookmarks match the current filter.'}
+                </p>
               ) : (
-                readLaterItems.map((item) => (
-                  <div key={item.id} className="read-later-item">
+                filteredReadLaterItems.map((item) => (
+                  <div
+                    key={item.id}
+                    className={`read-later-item ${draggedReadLaterId === item.id ? 'dragging' : ''}`}
+                    draggable
+                    onDragStart={(event) => {
+                      event.dataTransfer.effectAllowed = 'move';
+                      event.dataTransfer.setData('text/plain', item.id);
+                      setDraggedReadLaterId(item.id);
+                    }}
+                    onDragEnd={() => setDraggedReadLaterId('')}
+                    onDragOver={(event) => event.preventDefault()}
+                    onDrop={(event) => reorderReadLaterItems(event, item)}
+                  >
+                    <span className="read-later-drag-handle" aria-hidden="true">&#8942;</span>
                     <div>
-                      <a href={item.url} target="_blank" rel="noreferrer">
-                        {item.title}
-                      </a>
-                      <a className="read-later-url" href={item.url} target="_blank" rel="noreferrer">
-                        {item.url}
-                      </a>
+                      {editingReadLaterId === item.id ? (
+                        <div className="read-later-edit-row">
+                          <input
+                            type="text"
+                            value={readLaterEditTitle}
+                            aria-label={`Edit title for ${item.title}`}
+                            onChange={(event) => setReadLaterEditTitle(event.target.value)}
+                            onClick={(event) => event.stopPropagation()}
+                          />
+                          <select
+                            value={readLaterEditTopic}
+                            aria-label={`Edit topic for ${item.title}`}
+                            onChange={(event) => setReadLaterEditTopic(event.target.value)}
+                            onClick={(event) => event.stopPropagation()}
+                          >
+                            <option value="General">General</option>
+                            {topics.map((topic) => (
+                              <option key={topic} value={topic}>
+                                {topic}
+                              </option>
+                            ))}
+                          </select>
+                          <button
+                            type="button"
+                            className="read-later-edit-save"
+                            onClick={(event) => {
+                              event.stopPropagation();
+                              saveReadLaterDetails(item);
+                            }}
+                          >
+                            Save
+                          </button>
+                          <button
+                            type="button"
+                            className="read-later-edit-cancel"
+                            onClick={(event) => {
+                              event.stopPropagation();
+                              cancelEditingReadLater();
+                            }}
+                          >
+                            Cancel
+                          </button>
+                        </div>
+                      ) : (
+                        <div className="read-later-title-row">
+                          <a href={item.url} target="_blank" rel="noreferrer">
+                            {item.title}
+                          </a>
+                          <span className="read-later-topic">{item.topic}</span>
+                          <button
+                            type="button"
+                            className="read-later-edit-button"
+                            aria-label={`Edit ${item.title}`}
+                            title="Edit title and topic"
+                            onClick={(event) => {
+                              event.stopPropagation();
+                              startEditingReadLater(item);
+                            }}
+                          >
+                            <Pencil size={15} strokeWidth={2} aria-hidden="true" />
+                          </button>
+                          <button
+                            type="button"
+                            className="read-later-notes-toggle"
+                            aria-expanded={expandedReadLaterId === item.id}
+                            onClick={(event) => {
+                              event.stopPropagation();
+                              setExpandedReadLaterId((expandedId) =>
+                                expandedId === item.id ? '' : item.id,
+                              );
+                            }}
+                          >
+                            {expandedReadLaterId === item.id
+                              ? 'Hide notes'
+                              : item.notes
+                                ? 'View notes'
+                                : 'Add notes'}
+                          </button>
+                        </div>
+                      )}
+                      <div className="read-later-url-row">
+                        <a
+                          className="read-later-url"
+                          href={item.url}
+                          target="_blank"
+                          rel="noreferrer"
+                          title={item.url}
+                        >
+                          {formatReadLaterUrl(item.url)}
+                        </a>
+                      </div>
+                      {expandedReadLaterId === item.id && (
+                        <>
+                          <textarea
+                            className="read-later-notes"
+                            value={item.notes}
+                            placeholder="Add notes..."
+                            aria-label={`Notes for ${item.title}`}
+                            onChange={(event) => {
+                              const notes = event.target.value;
+                              setReadLaterItems((previous) =>
+                                previous.map((savedItem) =>
+                                  savedItem.id === item.id ? { ...savedItem, notes } : savedItem,
+                                ),
+                              );
+                            }}
+                            onClick={(event) => event.stopPropagation()}
+                          />
+                          <button
+                            type="button"
+                            className="read-later-save-notes"
+                            onClick={() => saveReadLaterNotes(item)}
+                          >
+                            Save notes
+                          </button>
+                        </>
+                      )}
                     </div>
                     <button
                       type="button"
@@ -1240,10 +1615,29 @@ function App() {
           <button className="search-btn">🔍</button>
         </div>
         <div className="header-right">
-          <div className="user-dropdown">
-            <span>👤 User</span>
-            <span className="dropdown-icon">▼</span>
-          </div>
+          <button
+            type="button"
+            className="theme-toggle"
+            aria-label={isDarkMode ? 'Switch to light mode' : 'Switch to dark mode'}
+            aria-pressed={isDarkMode}
+            onClick={() => setIsDarkMode((isDark) => !isDark)}
+          >
+            {isDarkMode ? (
+              <Sun size={17} strokeWidth={2} aria-hidden="true" />
+            ) : (
+              <Moon size={17} strokeWidth={2} aria-hidden="true" />
+            )}
+            {isDarkMode ? 'Light' : 'Dark'}
+          </button>
+          <button
+            type="button"
+            className="user-dropdown"
+            aria-label={`Open Bookmarks (${readLaterItems.length})`}
+            onClick={() => setIsReadLaterOpen(true)}
+          >
+            
+            <span className="dropdown-icon">Bookmarks {readLaterItems.length}</span>
+          </button>
         </div>
       </header>
 
@@ -1255,9 +1649,6 @@ function App() {
             <h3 className="sidebar-title">TOPICS</h3>
             <button className="topic-item add-topic-btn" onClick={addTopic}>
               + Add New Topic
-            </button>
-            <button className="read-later-sidebar-button" onClick={() => setIsReadLaterOpen(true)}>
-              Bookmarks <span>{readLaterItems.length}</span>
             </button>
             {topics.length === 0 && !selectedTopic && (
               <button className="topic-item general-topic" onClick={() => setSelectedTopic('')}>
@@ -1353,29 +1744,114 @@ function App() {
                 {sortedWebsites.map((site) => (
                   <div
                     key={site.id}
-                    className="article-card"
+                    className={`article-card ${draggedSiteId === site.id ? 'dragging' : ''}`}
+                    draggable
+                    onDragStart={(event) => {
+                      event.dataTransfer.effectAllowed = 'move';
+                      event.dataTransfer.setData('text/plain', site.id);
+                      setDraggedSiteId(site.id);
+                    }}
+                    onDragEnd={() => setDraggedSiteId('')}
+                    onDragOver={(event) => event.preventDefault()}
+                    onDrop={(event) => reorderWebsites(event, site)}
                     onClick={() => setActiveSiteId(site.id)}
                   >
                     <div className="card-header">
                       <span className="card-domain">{site.topic || 'General'}</span>
-                    </div>
-                    <div className="card-title-row">
-                      <h3 className="card-title">{site.title}</h3>
                       <button
                         type="button"
-                        className="edit-title-button"
-                        aria-label={`Edit title for ${site.title}`}
-                        title="Edit title"
-                        disabled={isBusy}
+                        className="article-notes-toggle"
+                        aria-expanded={expandedSiteNotesId === site.id}
                         onClick={(event) => {
                           event.stopPropagation();
-                          editWebsiteTitle(site);
+                          setExpandedSiteNotesId((expandedId) =>
+                            expandedId === site.id ? '' : site.id,
+                          );
                         }}
                       >
-                        <Pencil size={15} strokeWidth={2} aria-hidden="true" />
+                        {expandedSiteNotesId === site.id
+                          ? 'Hide notes'
+                          : site.notes
+                            ? 'View notes'
+                            : 'Add notes'}
                       </button>
                     </div>
-                    <p className="card-url">{site.url}</p>
+                    {editingSiteId === site.id ? (
+                      <div className="article-edit-row" onClick={(event) => event.stopPropagation()}>
+                        <input
+                          type="text"
+                          value={siteEditTitle}
+                          aria-label={`Edit title for ${site.title}`}
+                          onChange={(event) => setSiteEditTitle(event.target.value)}
+                        />
+                        <select
+                          value={siteEditTopic}
+                          aria-label={`Edit topic for ${site.title}`}
+                          onChange={(event) => setSiteEditTopic(event.target.value)}
+                        >
+                          {topics.map((topic) => (
+                            <option key={topic} value={topic}>
+                              {topic}
+                            </option>
+                          ))}
+                        </select>
+                        <button
+                          type="button"
+                          className="article-edit-save"
+                          onClick={() => saveWebsiteDetails(site)}
+                        >
+                          Save
+                        </button>
+                        <button
+                          type="button"
+                          className="article-edit-cancel"
+                          onClick={cancelEditingWebsite}
+                        >
+                          Cancel
+                        </button>
+                      </div>
+                    ) : (
+                      <div className="card-title-row">
+                        <h3 className="card-title">{site.title}</h3>
+                        <button
+                          type="button"
+                          className="edit-title-button"
+                          aria-label={`Edit title and topic for ${site.title}`}
+                          title="Edit title and topic"
+                          disabled={isBusy}
+                          onClick={(event) => {
+                            event.stopPropagation();
+                            startEditingWebsite(site);
+                          }}
+                        >
+                          <Pencil size={15} strokeWidth={2} aria-hidden="true" />
+                        </button>
+                      </div>
+                    )}
+                    {expandedSiteNotesId === site.id && (
+                      <div
+                        className="article-notes-editor"
+                        onClick={(event) => event.stopPropagation()}
+                      >
+                        <textarea
+                          value={site.notes}
+                          placeholder="Add notes..."
+                          aria-label={`Notes for ${site.title}`}
+                          onChange={(event) => {
+                            const notes = event.target.value;
+                            setCachedWebsites((previous) =>
+                              previous.map((cachedSite) =>
+                                cachedSite.id === site.id ? { ...cachedSite, notes } : cachedSite,
+                              ),
+                            );
+                          }}
+                        />
+                        <button type="button" onClick={() => saveWebsiteNotes(site)}>
+                          Save notes
+                        </button>
+                      </div>
+                    )}
+                    <p className="card-url" title={site.url}>{site.url}</p>
                     <p className="card-date">Added {formatDate(site.createdAt)}</p>
                     <div className="card-actions">
                       <button
