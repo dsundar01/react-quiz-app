@@ -473,6 +473,21 @@ select {
   font-size: 0.82rem;
 }
 
+.read-later-notes-toggle {
+  flex-shrink: 0;
+  margin: 0;
+  padding: 0;
+  background: transparent;
+  color: var(--accent);
+  font-size: 0.78rem;
+  white-space: nowrap;
+}
+
+.read-later-notes-toggle:hover {
+  transform: none;
+  text-decoration: underline;
+}
+
 .read-later-save-notes {
   margin-top: 0.45rem;
   padding: 0.35rem 0.6rem;
@@ -489,16 +504,39 @@ select {
   color: var(--accent);
 }
 
+.read-later-title-row {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0.65rem;
+  min-width: 0;
+}
+
+.read-later-title-row > a {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .read-later-item .read-later-url {
-  display: block;
-  max-width: 68vw;
-  margin-top: 0.2rem;
+  min-width: 0;
+  flex: 1 1 120px;
   overflow: hidden;
   color: var(--subtle);
   font-size: 0.78rem;
   text-overflow: ellipsis;
   white-space: nowrap;
   text-decoration: none;
+}
+
+.read-later-url-row {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0.65rem;
+  min-width: 0;
+  margin-top: 0.2rem;
 }
 
 .read-later-item .read-later-url:hover {
@@ -848,6 +886,10 @@ html[data-theme='dark'] .modal-content {
 html[data-theme='dark'] .read-later-item {
   background: #1e293b;
   border-color: var(--border);
+}
+
+html[data-theme='dark'] .read-later-notes-toggle {
+  color: var(--accent-2);
 }
 
 html[data-theme='dark'] .read-later-remove,

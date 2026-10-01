@@ -10,6 +10,17 @@ const normalizeSiteName = (url) => {
   }
 };
 
+const formatReadLaterUrl = (url) => {
+  try {
+    const parsedUrl = new URL(url);
+    const hostname = parsedUrl.hostname.replace(/^www\./i, '');
+    const path = parsedUrl.pathname === '/' ? '' : parsedUrl.pathname;
+    return `${hostname}${path}${parsedUrl.search}${parsedUrl.hash}`;
+  } catch {
+    return url.replace(/^https?:\/\/(www\.)?/i, '');
+  }
+};
+
 const mapSupabaseSite = (item) => ({
   id: item.id,
   title: item.title || normalizeSiteName(item.url),
@@ -62,6 +73,7 @@ function App() {
   const [readLaterItems, setReadLaterItems] = useState([]);
   const [isReadLaterOpen, setIsReadLaterOpen] = useState(false);
   const [draggedReadLaterId, setDraggedReadLaterId] = useState('');
+  const [expandedReadLaterId, setExpandedReadLaterId] = useState('');
   const [isDarkMode, setIsDarkMode] = useState(
     () => window.localStorage.getItem('website-cache-dark-mode') === 'true',
   );
@@ -1266,34 +1278,59 @@ function App() {
                   >
                     <span className="read-later-drag-handle" aria-hidden="true">&#8942;</span>
                     <div>
-                      <a href={item.url} target="_blank" rel="noreferrer">
-                        {item.title}
-                      </a>
-                      <a className="read-later-url" href={item.url} target="_blank" rel="noreferrer">
-                        {item.url}
-                      </a>
-                      <textarea
-                        className="read-later-notes"
-                        value={item.notes}
-                        placeholder="Add notes..."
-                        aria-label={`Notes for ${item.title}`}
-                        onChange={(event) => {
-                          const notes = event.target.value;
-                          setReadLaterItems((previous) =>
-                            previous.map((savedItem) =>
-                              savedItem.id === item.id ? { ...savedItem, notes } : savedItem,
-                            ),
-                          );
-                        }}
-                        onClick={(event) => event.stopPropagation()}
-                      />
-                      <button
-                        type="button"
-                        className="read-later-save-notes"
-                        onClick={() => saveReadLaterNotes(item)}
-                      >
-                        Save notes
-                      </button>
+                      <div className="read-later-title-row">
+                        <a href={item.url} target="_blank" rel="noreferrer">
+                          {item.title}
+                        </a>
+                        <button
+                          type="button"
+                          className="read-later-notes-toggle"
+                          aria-expanded={expandedReadLaterId === item.id}
+                          onClick={(event) => {
+                            event.stopPropagation();
+                            setExpandedReadLaterId((expandedId) =>
+                              expandedId === item.id ? '' : item.id,
+                            );
+                          }}
+                        >
+                          {expandedReadLaterId === item.id
+                            ? 'Hide notes'
+                            : item.notes
+                              ? 'View notes'
+                              : 'Add notes'}
+                        </button>
+                      </div>
+                      <div className="read-later-url-row">
+                        <a className="read-later-url" href={item.url} target="_blank" rel="noreferrer">
+                          {formatReadLaterUrl(item.url)}
+                        </a>
+                      </div>
+                      {expandedReadLaterId === item.id && (
+                        <>
+                          <textarea
+                            className="read-later-notes"
+                            value={item.notes}
+                            placeholder="Add notes..."
+                            aria-label={`Notes for ${item.title}`}
+                            onChange={(event) => {
+                              const notes = event.target.value;
+                              setReadLaterItems((previous) =>
+                                previous.map((savedItem) =>
+                                  savedItem.id === item.id ? { ...savedItem, notes } : savedItem,
+                                ),
+                              );
+                            }}
+                            onClick={(event) => event.stopPropagation()}
+                          />
+                          <button
+                            type="button"
+                            className="read-later-save-notes"
+                            onClick={() => saveReadLaterNotes(item)}
+                          >
+                            Save notes
+                          </button>
+                        </>
+                      )}
                     </div>
                     <button
                       type="button"
