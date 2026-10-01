@@ -36,6 +36,7 @@ const mapReadLaterItem = (item) => ({
   id: item.id,
   title: item.title || normalizeSiteName(item.url),
   url: item.url,
+  topic: item.topic || 'General',
   notes: item.notes || '',
   sortOrder: item.sort_order ?? null,
   createdAt: item.created_at,
@@ -70,10 +71,14 @@ function App() {
   const [cachedWebsites, setCachedWebsites] = useState([]);
   const [readLaterTitleInput, setReadLaterTitleInput] = useState('');
   const [readLaterUrlInput, setReadLaterUrlInput] = useState('');
+  const [readLaterTopicInput, setReadLaterTopicInput] = useState('');
   const [readLaterItems, setReadLaterItems] = useState([]);
   const [isReadLaterOpen, setIsReadLaterOpen] = useState(false);
   const [draggedReadLaterId, setDraggedReadLaterId] = useState('');
   const [expandedReadLaterId, setExpandedReadLaterId] = useState('');
+  const [editingReadLaterId, setEditingReadLaterId] = useState('');
+  const [readLaterEditTitle, setReadLaterEditTitle] = useState('');
+  const [readLaterEditTopic, setReadLaterEditTopic] = useState('');
   const [isDarkMode, setIsDarkMode] = useState(
     () => window.localStorage.getItem('website-cache-dark-mode') === 'true',
   );
@@ -132,6 +137,15 @@ function App() {
     return matchesSearch && matchesTopic;
   });
 
+  const filteredReadLaterItems = readLaterItems.filter((item) => {
+    const normalizedSearch = searchQuery.toLowerCase();
+    const matchesSearch =
+      item.title.toLowerCase().includes(normalizedSearch) ||
+      item.url.toLowerCase().includes(normalizedSearch);
+    const matchesTopic = !readLaterTopicInput || item.topic === readLaterTopicInput;
+    return matchesSearch && matchesTopic;
+  });
+
   // Sort by most recent first
   const sortedWebsites = [...filteredWebsites].sort(
     (a, b) => new Date(b.createdAt) - new Date(a.createdAt),
@@ -177,7 +191,7 @@ function App() {
       }
       const { data: readLaterData, error: readLaterError } = await supabase
         .from('read_later_items')
-        .select('id, title, url, notes, sort_order, created_at')
+        .select('id, title, url, topic, notes, sort_order, created_at')
         .order('sort_order', { ascending: true, nullsFirst: false })
         .order('created_at', { ascending: false });
 
@@ -404,8 +418,14 @@ function App() {
     ) - 1;
     const { data, error } = await supabase
       .from('read_later_items')
-      .insert({ title: trimmedTitle || normalizeSiteName(url), url, notes: '', sort_order: nextSortOrder })
-      .select('id, title, url, notes, sort_order, created_at')
+      .insert({
+        title: trimmedTitle || normalizeSiteName(url),
+        url,
+        topic: readLaterTopicInput || 'General',
+        notes: '',
+        sort_order: nextSortOrder,
+      })
+      .select('id, title, url, topic, notes, sort_order, created_at')
       .single();
 
     if (error) {
@@ -417,6 +437,7 @@ function App() {
     setReadLaterItems((previous) => [mapReadLaterItem(data), ...previous]);
     setReadLaterTitleInput('');
     setReadLaterUrlInput('');
+    setReadLaterTopicInput('');
     setWebsiteNotice('Added to Bookmarks.');
     setIsBusy(false);
   };
@@ -437,6 +458,49 @@ function App() {
       return;
     }
     setWebsiteNotice('Bookmark notes saved.');
+  };
+
+  const startEditingReadLater = (item) => {
+    setEditingReadLaterId(item.id);
+    setReadLaterEditTitle(item.title);
+    setReadLaterEditTopic(item.topic);
+  };
+
+  const cancelEditingReadLater = () => {
+    setEditingReadLaterId('');
+    setReadLaterEditTitle('');
+    setReadLaterEditTopic('');
+  };
+
+  const saveReadLaterDetails = async (item) => {
+    const title = readLaterEditTitle.trim();
+    if (!title) {
+      setWebsiteError('Please enter a bookmark title.');
+      return;
+    }
+    if (!supabase) {
+      setWebsiteError('Supabase is not configured. The bookmark was not updated.');
+      return;
+    }
+
+    const { error } = await supabase
+      .from('read_later_items')
+      .update({ title, topic: readLaterEditTopic || 'General' })
+      .eq('id', item.id);
+
+    if (error) {
+      setWebsiteError(`Unable to update bookmark: ${error.message}`);
+      return;
+    }
+    setReadLaterItems((previous) =>
+      previous.map((savedItem) =>
+        savedItem.id === item.id
+          ? { ...savedItem, title, topic: readLaterEditTopic || 'General' }
+          : savedItem,
+      ),
+    );
+    cancelEditingReadLater();
+    setWebsiteNotice('Bookmark updated.');
   };
 
   const reorderReadLaterItems = async (event, targetItem) => {
@@ -1254,15 +1318,33 @@ function App() {
                 placeholder="https://example.com"
                 aria-label="Bookmarks URL"
               />
+              <select
+                className="read-later-topic-select"
+                value={readLaterTopicInput}
+                onChange={(event) => setReadLaterTopicInput(event.target.value)}
+                aria-label="Bookmark topic"
+              >
+                <option value="">All topics</option>
+                <option value="General">General</option>
+                {topics.map((topic) => (
+                  <option key={topic} value={topic}>
+                    {topic}
+                  </option>
+                ))}
+              </select>
               <button type="button" onClick={handleSaveForLater} disabled={isBusy}>
                 Add bookmark
               </button>
             </div>
             <div className="read-later-list">
-              {readLaterItems.length === 0 ? (
-                <p className="read-later-empty">No bookmarks saved yet.</p>
+              {filteredReadLaterItems.length === 0 ? (
+                <p className="read-later-empty">
+                  {readLaterItems.length === 0
+                    ? 'No bookmarks saved yet.'
+                    : 'No bookmarks match the current filter.'}
+                </p>
               ) : (
-                readLaterItems.map((item) => (
+                filteredReadLaterItems.map((item) => (
                   <div
                     key={item.id}
                     className={`read-later-item ${draggedReadLaterId === item.id ? 'dragging' : ''}`}
@@ -1278,30 +1360,94 @@ function App() {
                   >
                     <span className="read-later-drag-handle" aria-hidden="true">&#8942;</span>
                     <div>
-                      <div className="read-later-title-row">
-                        <a href={item.url} target="_blank" rel="noreferrer">
-                          {item.title}
-                        </a>
-                        <button
-                          type="button"
-                          className="read-later-notes-toggle"
-                          aria-expanded={expandedReadLaterId === item.id}
-                          onClick={(event) => {
-                            event.stopPropagation();
-                            setExpandedReadLaterId((expandedId) =>
-                              expandedId === item.id ? '' : item.id,
-                            );
-                          }}
-                        >
-                          {expandedReadLaterId === item.id
-                            ? 'Hide notes'
-                            : item.notes
-                              ? 'View notes'
-                              : 'Add notes'}
-                        </button>
-                      </div>
+                      {editingReadLaterId === item.id ? (
+                        <div className="read-later-edit-row">
+                          <input
+                            type="text"
+                            value={readLaterEditTitle}
+                            aria-label={`Edit title for ${item.title}`}
+                            onChange={(event) => setReadLaterEditTitle(event.target.value)}
+                            onClick={(event) => event.stopPropagation()}
+                          />
+                          <select
+                            value={readLaterEditTopic}
+                            aria-label={`Edit topic for ${item.title}`}
+                            onChange={(event) => setReadLaterEditTopic(event.target.value)}
+                            onClick={(event) => event.stopPropagation()}
+                          >
+                            <option value="General">General</option>
+                            {topics.map((topic) => (
+                              <option key={topic} value={topic}>
+                                {topic}
+                              </option>
+                            ))}
+                          </select>
+                          <button
+                            type="button"
+                            className="read-later-edit-save"
+                            onClick={(event) => {
+                              event.stopPropagation();
+                              saveReadLaterDetails(item);
+                            }}
+                          >
+                            Save
+                          </button>
+                          <button
+                            type="button"
+                            className="read-later-edit-cancel"
+                            onClick={(event) => {
+                              event.stopPropagation();
+                              cancelEditingReadLater();
+                            }}
+                          >
+                            Cancel
+                          </button>
+                        </div>
+                      ) : (
+                        <div className="read-later-title-row">
+                          <a href={item.url} target="_blank" rel="noreferrer">
+                            {item.title}
+                          </a>
+                          <span className="read-later-topic">{item.topic}</span>
+                          <button
+                            type="button"
+                            className="read-later-edit-button"
+                            aria-label={`Edit ${item.title}`}
+                            title="Edit title and topic"
+                            onClick={(event) => {
+                              event.stopPropagation();
+                              startEditingReadLater(item);
+                            }}
+                          >
+                            <Pencil size={15} strokeWidth={2} aria-hidden="true" />
+                          </button>
+                          <button
+                            type="button"
+                            className="read-later-notes-toggle"
+                            aria-expanded={expandedReadLaterId === item.id}
+                            onClick={(event) => {
+                              event.stopPropagation();
+                              setExpandedReadLaterId((expandedId) =>
+                                expandedId === item.id ? '' : item.id,
+                              );
+                            }}
+                          >
+                            {expandedReadLaterId === item.id
+                              ? 'Hide notes'
+                              : item.notes
+                                ? 'View notes'
+                                : 'Add notes'}
+                          </button>
+                        </div>
+                      )}
                       <div className="read-later-url-row">
-                        <a className="read-later-url" href={item.url} target="_blank" rel="noreferrer">
+                        <a
+                          className="read-later-url"
+                          href={item.url}
+                          target="_blank"
+                          rel="noreferrer"
+                          title={item.url}
+                        >
                           {formatReadLaterUrl(item.url)}
                         </a>
                       </div>
