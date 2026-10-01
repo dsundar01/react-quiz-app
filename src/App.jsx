@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { Eraser, Pencil } from 'lucide-react';
+import { Eraser, Menu, Pencil } from 'lucide-react';
 import { supabase } from './lib/supabaseClient';
 
 const normalizeSiteName = (url) => {
@@ -30,6 +30,27 @@ const mapReadLaterItem = (item) => ({
 
 const mapTopic = (item) => item.name;
 
+const describeFunctionError = async (error) => {
+  if (!error) return 'No error returned';
+  console.error('Edge Function error:', error);
+  const status = error?.context?.status;
+  if (typeof status === 'number') {
+    try {
+      const body = await error.context.json();
+      return `HTTP ${status}: ${body?.error || JSON.stringify(body)}`;
+    } catch {
+      try {
+        const text = await error.context.text();
+        const preview = text?.slice(0, 300) || '(empty body)';
+        return `HTTP ${status}: ${preview}`;
+      } catch (readErr) {
+        return `HTTP ${status}: (could not read response body: ${readErr.message})`;
+      }
+    }
+  }
+  return `${error.name || 'Edge Function error'}: ${error.message}`;
+};
+
 function App() {
   const [websiteTitleInput, setWebsiteTitleInput] = useState('');
   const [websiteUrlInput, setWebsiteUrlInput] = useState('');
@@ -45,6 +66,7 @@ function App() {
   const [searchQuery, setSearchQuery] = useState('');
   const [topics, setTopics] = useState([]);
   const [selectedTopic, setSelectedTopic] = useState('');
+  const [isTopicsSidebarOpen, setIsTopicsSidebarOpen] = useState(false);
   const [penEnabled, setPenEnabled] = useState(false);
   const [penMode, setPenMode] = useState('underline');
   const [penColor, setPenColor] = useState('#ef4444');
@@ -213,9 +235,11 @@ function App() {
       );
 
       if (snapshotError || !snapshotData?.website) {
-        setWebsiteNotice(
-          'Website saved, but its content snapshot could not be created. Deploy capture-website in Supabase.',
-        );
+        const reason = snapshotData?.error
+          ? `Server: ${snapshotData.error}`
+          : await describeFunctionError(snapshotError);
+        setWebsiteNotice('Website saved, but its content snapshot could not be created.');
+        setWebsiteError(`Snapshot failed: ${reason}`);
       } else {
         const { data: storedSite, error: storedSiteError } = await supabase
           .from('saved_websites')
@@ -392,7 +416,9 @@ function App() {
     });
 
     if (error || !data?.website) {
-      const message = error?.message || 'The capture function did not return a snapshot.';
+      const message = data?.error
+        ? `Server: ${data.error}`
+        : await describeFunctionError(error);
       setWebsiteError(`Unable to capture snapshot: ${message}`);
       setIsBusy(false);
       return;
@@ -1191,6 +1217,16 @@ function App() {
       {/* Header */}
       <header className="app-header">
         <div className="header-left">
+          <button
+            type="button"
+            className="topics-toggle"
+            aria-expanded={isTopicsSidebarOpen}
+            aria-controls="topics-sidebar"
+            onClick={() => setIsTopicsSidebarOpen((isOpen) => !isOpen)}
+          >
+            <Menu size={18} strokeWidth={2} aria-hidden="true" />
+            Topics
+          </button>
           <h1 className="app-title">YOUR CURATED TECHNICAL CACHE</h1>
         </div>
         <div className="header-search">
@@ -1213,7 +1249,8 @@ function App() {
 
       <div className="app-container">
         {/* Sidebar with topics */}
-        <aside className="app-sidebar">
+        {isTopicsSidebarOpen && (
+        <aside id="topics-sidebar" className="app-sidebar">
           <div className="sidebar-section">
             <h3 className="sidebar-title">TOPICS</h3>
             <button className="topic-item add-topic-btn" onClick={addTopic}>
@@ -1239,6 +1276,7 @@ function App() {
             ))}
           </div>
         </aside>
+        )}
 
         {/* Main content */}
         <main className="app-main">

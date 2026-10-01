@@ -88,7 +88,21 @@ select {
 }
 
 .header-left {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
   flex-shrink: 0;
+}
+
+.topics-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45rem;
+  padding: 8px 10px;
+  background: #f6faff;
+  color: var(--ink);
+  border: 1px solid var(--border);
+  white-space: nowrap;
 }
 
 .app-title {
