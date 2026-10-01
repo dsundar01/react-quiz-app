@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { Eraser, Menu, Pencil } from 'lucide-react';
+import { Eraser, Menu, Moon, Pencil, Sun } from 'lucide-react';
 import { supabase } from './lib/supabaseClient';
 
 const normalizeSiteName = (url) => {
@@ -59,6 +59,9 @@ function App() {
   const [readLaterUrlInput, setReadLaterUrlInput] = useState('');
   const [readLaterItems, setReadLaterItems] = useState([]);
   const [isReadLaterOpen, setIsReadLaterOpen] = useState(false);
+  const [isDarkMode, setIsDarkMode] = useState(
+    () => window.localStorage.getItem('website-cache-dark-mode') === 'true',
+  );
   const [activeSiteId, setActiveSiteId] = useState('');
   const [websiteNotice, setWebsiteNotice] = useState('');
   const [websiteError, setWebsiteError] = useState('');
@@ -99,6 +102,11 @@ function App() {
       size: penSize,
     };
   }, [penColor, penEnabled, penMode, penSize]);
+
+  useEffect(() => {
+    document.documentElement.dataset.theme = isDarkMode ? 'dark' : 'light';
+    window.localStorage.setItem('website-cache-dark-mode', String(isDarkMode));
+  }, [isDarkMode]);
 
   // Filter websites by search and topic 
   const filteredWebsites = cachedWebsites.filter((site) => {
@@ -1240,10 +1248,29 @@ function App() {
           <button className="search-btn">🔍</button>
         </div>
         <div className="header-right">
-          <div className="user-dropdown">
-            <span>👤 User</span>
-            <span className="dropdown-icon">▼</span>
-          </div>
+          <button
+            type="button"
+            className="theme-toggle"
+            aria-label={isDarkMode ? 'Switch to light mode' : 'Switch to dark mode'}
+            aria-pressed={isDarkMode}
+            onClick={() => setIsDarkMode((isDark) => !isDark)}
+          >
+            {isDarkMode ? (
+              <Sun size={17} strokeWidth={2} aria-hidden="true" />
+            ) : (
+              <Moon size={17} strokeWidth={2} aria-hidden="true" />
+            )}
+            {isDarkMode ? 'Light' : 'Dark'}
+          </button>
+          <button
+            type="button"
+            className="user-dropdown"
+            aria-label={`Open Bookmarks (${readLaterItems.length})`}
+            onClick={() => setIsReadLaterOpen(true)}
+          >
+            
+            <span className="dropdown-icon">Bookmarks {readLaterItems.length}</span>
+          </button>
         </div>
       </header>
 
@@ -1255,9 +1282,6 @@ function App() {
             <h3 className="sidebar-title">TOPICS</h3>
             <button className="topic-item add-topic-btn" onClick={addTopic}>
               + Add New Topic
-            </button>
-            <button className="read-later-sidebar-button" onClick={() => setIsReadLaterOpen(true)}>
-              Bookmarks <span>{readLaterItems.length}</span>
             </button>
             {topics.length === 0 && !selectedTopic && (
               <button className="topic-item general-topic" onClick={() => setSelectedTopic('')}>
