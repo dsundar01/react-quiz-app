@@ -21,6 +21,8 @@ create table if not exists public.saved_websites (
   snapshot_pdf_path text,
   snapshot_created_at timestamptz,
   annotations jsonb not null default '[]'::jsonb,
+  notes text not null default '',
+  sort_order integer not null default 0,
   created_at timestamptz not null default now()
 );
 ```
@@ -32,7 +34,9 @@ alter table public.saved_websites
   add column if not exists snapshot_html text,
   add column if not exists snapshot_pdf_path text,
   add column if not exists snapshot_created_at timestamptz,
-  add column if not exists annotations jsonb not null default '[]'::jsonb;
+  add column if not exists annotations jsonb not null default '[]'::jsonb,
+  add column if not exists notes text not null default '',
+  add column if not exists sort_order integer not null default 0;
 ```
 
 If the app reports that `saved_websites.snapshot_pdf_path` does not exist, run this migration in Supabase SQL Editor and reload the app:

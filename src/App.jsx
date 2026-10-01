@@ -29,6 +29,8 @@ const mapSupabaseSite = (item) => ({
   snapshotHtml: item.snapshot_html,
   snapshotCreatedAt: item.snapshot_created_at,
   annotations: Array.isArray(item.annotations) ? item.annotations : [],
+  notes: item.notes || '',
+  sortOrder: item.sort_order ?? null,
   createdAt: item.created_at,
 });
 
@@ -90,6 +92,11 @@ function App() {
   const [topics, setTopics] = useState([]);
   const [selectedTopic, setSelectedTopic] = useState('');
   const [isTopicsSidebarOpen, setIsTopicsSidebarOpen] = useState(false);
+  const [editingSiteId, setEditingSiteId] = useState('');
+  const [siteEditTitle, setSiteEditTitle] = useState('');
+  const [siteEditTopic, setSiteEditTopic] = useState('');
+  const [draggedSiteId, setDraggedSiteId] = useState('');
+  const [expandedSiteNotesId, setExpandedSiteNotesId] = useState('');
   const [penEnabled, setPenEnabled] = useState(false);
   const [penMode, setPenMode] = useState('underline');
   const [penColor, setPenColor] = useState('#ef4444');
@@ -146,10 +153,21 @@ function App() {
     return matchesSearch && matchesTopic;
   });
 
-  // Sort by most recent first
+  // Keep custom order first, with older rows falling back to recency.
   const sortedWebsites = [...filteredWebsites].sort(
-    (a, b) => new Date(b.createdAt) - new Date(a.createdAt),
+    (a, b) => {
+      if (a.sortOrder !== null && b.sortOrder !== null) return a.sortOrder - b.sortOrder;
+      if (a.sortOrder !== null) return -1;
+      if (b.sortOrder !== null) return 1;
+      return new Date(b.createdAt) - new Date(a.createdAt);
+    },
   );
+
+  const getNextSiteSortOrder = () =>
+    cachedWebsites.reduce(
+      (lowestOrder, site) => Math.min(lowestOrder, site.sortOrder ?? 0),
+      0,
+    ) - 1;
 
   useEffect(() => {
     const loadSites = async () => {
@@ -165,7 +183,8 @@ function App() {
 
       const { data, error } = await supabase
         .from('saved_websites')
-        .select('id, title, url, topic, snapshot_html, snapshot_created_at, annotations, created_at')
+        .select('id, title, url, topic, snapshot_html, snapshot_created_at, annotations, notes, sort_order, created_at')
+        .order('sort_order', { ascending: true, nullsFirst: false })
         .order('created_at', { ascending: false });
 
       if (error) {
@@ -254,8 +273,8 @@ function App() {
     if (supabase) {
       const { data, error } = await supabase
         .from('saved_websites')
-        .insert({ title, url: normalizedUrl, topic })
-        .select('id, title, url, topic, snapshot_html, snapshot_created_at, annotations, created_at')
+        .insert({ title, url: normalizedUrl, topic, notes: '', sort_order: getNextSiteSortOrder() })
+        .select('id, title, url, topic, snapshot_html, snapshot_created_at, annotations, notes, sort_order, created_at')
         .single();
 
       if (error) {
@@ -281,7 +300,7 @@ function App() {
       } else {
         const { data: storedSite, error: storedSiteError } = await supabase
           .from('saved_websites')
-          .select('id, title, url, topic, snapshot_html, snapshot_created_at, annotations, created_at')
+          .select('id, title, url, topic, snapshot_html, snapshot_created_at, annotations, notes, sort_order, created_at')
           .eq('id', savedSite.id)
           .single();
         if (storedSiteError) {
@@ -351,8 +370,8 @@ function App() {
 
     const { data: savedRecord, error: insertError } = await supabase
       .from('saved_websites')
-      .insert({ title, url, topic })
-      .select('id, title, url, topic, snapshot_html, snapshot_created_at, annotations, created_at')
+      .insert({ title, url, topic, notes: '', sort_order: getNextSiteSortOrder() })
+      .select('id, title, url, topic, snapshot_html, snapshot_created_at, annotations, notes, sort_order, created_at')
       .single();
 
     if (insertError) {
@@ -365,7 +384,7 @@ function App() {
       .from('saved_websites')
       .update({ snapshot_html: snapshotHtml, snapshot_created_at: new Date().toISOString() })
       .eq('id', savedRecord.id)
-      .select('id, title, url, topic, snapshot_html, snapshot_created_at, annotations, created_at')
+      .select('id, title, url, topic, snapshot_html, snapshot_created_at, annotations, notes, sort_order, created_at')
       .single();
 
     if (updateError) {
@@ -564,7 +583,7 @@ function App() {
 
     const { data: storedSite, error: storedSiteError } = await supabase
       .from('saved_websites')
-      .select('id, title, url, topic, snapshot_html, snapshot_created_at, annotations, created_at')
+      .select('id, title, url, topic, snapshot_html, snapshot_created_at, annotations, notes, sort_order, created_at')
       .eq('id', site.id)
       .single();
 
@@ -582,27 +601,103 @@ function App() {
     setIsBusy(false);
   };
 
-  const editWebsiteTitle = async (site) => {
-    const title = window.prompt('Edit article title:', site.title)?.trim();
-    if (!title || title === site.title) return;
+  const startEditingWebsite = (site) => {
+    setEditingSiteId(site.id);
+    setSiteEditTitle(site.title);
+    setSiteEditTopic(site.topic);
+  };
+
+  const cancelEditingWebsite = () => {
+    setEditingSiteId('');
+    setSiteEditTitle('');
+    setSiteEditTopic('');
+  };
+
+  const saveWebsiteDetails = async (site) => {
+    const title = siteEditTitle.trim();
+    const topic = siteEditTopic || 'General';
+    if (!title) {
+      setWebsiteError('Please enter an article title.');
+      return;
+    }
+    if (title === site.title && topic === site.topic) {
+      cancelEditingWebsite();
+      return;
+    }
     if (!supabase) {
-      setWebsiteError('Supabase is not configured. The title was not updated.');
+      setWebsiteError('Supabase is not configured. The article was not updated.');
       return;
     }
 
     setIsBusy(true);
-    const { error } = await supabase.from('saved_websites').update({ title }).eq('id', site.id);
+    const { error } = await supabase
+      .from('saved_websites')
+      .update({ title, topic })
+      .eq('id', site.id);
     if (error) {
-      setWebsiteError(`Unable to update title: ${error.message}`);
+      setWebsiteError(`Unable to update article: ${error.message}`);
       setIsBusy(false);
       return;
     }
 
     setCachedWebsites((previous) =>
-      previous.map((cachedSite) => (cachedSite.id === site.id ? { ...cachedSite, title } : cachedSite)),
+      previous.map((cachedSite) =>
+        cachedSite.id === site.id ? { ...cachedSite, title, topic } : cachedSite,
+      ),
     );
-    setWebsiteNotice('Article title updated.');
+    cancelEditingWebsite();
+    setWebsiteNotice('Article updated.');
     setIsBusy(false);
+  };
+
+  const saveWebsiteNotes = async (site) => {
+    if (!supabase) {
+      setWebsiteError('Supabase is not configured. The note was not saved.');
+      return;
+    }
+
+    const { error } = await supabase
+      .from('saved_websites')
+      .update({ notes: site.notes || '' })
+      .eq('id', site.id);
+
+    if (error) {
+      setWebsiteError(`Unable to save article notes: ${error.message}`);
+      return;
+    }
+    setWebsiteNotice('Article notes saved.');
+  };
+
+  const reorderWebsites = async (event, targetSite) => {
+    event.preventDefault();
+    const draggedId = event.dataTransfer.getData('text/plain') || draggedSiteId;
+    if (!draggedId || draggedId === targetSite.id) return;
+
+    const draggedIndex = cachedWebsites.findIndex((site) => site.id === draggedId);
+    const targetIndex = cachedWebsites.findIndex((site) => site.id === targetSite.id);
+    if (draggedIndex < 0 || targetIndex < 0) return;
+
+    const reorderedSites = [...cachedWebsites];
+    const [draggedSite] = reorderedSites.splice(draggedIndex, 1);
+    reorderedSites.splice(targetIndex, 0, draggedSite);
+    const orderedSites = reorderedSites.map((site, index) => ({
+      ...site,
+      sortOrder: index,
+    }));
+    setCachedWebsites(orderedSites);
+    setDraggedSiteId('');
+
+    const updates = await Promise.all(
+      orderedSites.map((site) =>
+        supabase.from('saved_websites').update({ sort_order: site.sortOrder }).eq('id', site.id),
+      ),
+    );
+    const failedUpdate = updates.find(({ error }) => error);
+    if (failedUpdate) {
+      setWebsiteError(`Unable to save article order: ${failedUpdate.error.message}`);
+      return;
+    }
+    setWebsiteNotice('Article order saved.');
   };
 
   const drawAnnotations = (annotations, temporaryLaser = null, temporaryLaserOpacity = 0) => {
@@ -1649,29 +1744,114 @@ function App() {
                 {sortedWebsites.map((site) => (
                   <div
                     key={site.id}
-                    className="article-card"
+                    className={`article-card ${draggedSiteId === site.id ? 'dragging' : ''}`}
+                    draggable
+                    onDragStart={(event) => {
+                      event.dataTransfer.effectAllowed = 'move';
+                      event.dataTransfer.setData('text/plain', site.id);
+                      setDraggedSiteId(site.id);
+                    }}
+                    onDragEnd={() => setDraggedSiteId('')}
+                    onDragOver={(event) => event.preventDefault()}
+                    onDrop={(event) => reorderWebsites(event, site)}
                     onClick={() => setActiveSiteId(site.id)}
                   >
                     <div className="card-header">
                       <span className="card-domain">{site.topic || 'General'}</span>
-                    </div>
-                    <div className="card-title-row">
-                      <h3 className="card-title">{site.title}</h3>
                       <button
                         type="button"
-                        className="edit-title-button"
-                        aria-label={`Edit title for ${site.title}`}
-                        title="Edit title"
-                        disabled={isBusy}
+                        className="article-notes-toggle"
+                        aria-expanded={expandedSiteNotesId === site.id}
                         onClick={(event) => {
                           event.stopPropagation();
-                          editWebsiteTitle(site);
+                          setExpandedSiteNotesId((expandedId) =>
+                            expandedId === site.id ? '' : site.id,
+                          );
                         }}
                       >
-                        <Pencil size={15} strokeWidth={2} aria-hidden="true" />
+                        {expandedSiteNotesId === site.id
+                          ? 'Hide notes'
+                          : site.notes
+                            ? 'View notes'
+                            : 'Add notes'}
                       </button>
                     </div>
-                    <p className="card-url">{site.url}</p>
+                    {editingSiteId === site.id ? (
+                      <div className="article-edit-row" onClick={(event) => event.stopPropagation()}>
+                        <input
+                          type="text"
+                          value={siteEditTitle}
+                          aria-label={`Edit title for ${site.title}`}
+                          onChange={(event) => setSiteEditTitle(event.target.value)}
+                        />
+                        <select
+                          value={siteEditTopic}
+                          aria-label={`Edit topic for ${site.title}`}
+                          onChange={(event) => setSiteEditTopic(event.target.value)}
+                        >
+                          {topics.map((topic) => (
+                            <option key={topic} value={topic}>
+                              {topic}
+                            </option>
+                          ))}
+                        </select>
+                        <button
+                          type="button"
+                          className="article-edit-save"
+                          onClick={() => saveWebsiteDetails(site)}
+                        >
+                          Save
+                        </button>
+                        <button
+                          type="button"
+                          className="article-edit-cancel"
+                          onClick={cancelEditingWebsite}
+                        >
+                          Cancel
+                        </button>
+                      </div>
+                    ) : (
+                      <div className="card-title-row">
+                        <h3 className="card-title">{site.title}</h3>
+                        <button
+                          type="button"
+                          className="edit-title-button"
+                          aria-label={`Edit title and topic for ${site.title}`}
+                          title="Edit title and topic"
+                          disabled={isBusy}
+                          onClick={(event) => {
+                            event.stopPropagation();
+                            startEditingWebsite(site);
+                          }}
+                        >
+                          <Pencil size={15} strokeWidth={2} aria-hidden="true" />
+                        </button>
+                      </div>
+                    )}
+                    {expandedSiteNotesId === site.id && (
+                      <div
+                        className="article-notes-editor"
+                        onClick={(event) => event.stopPropagation()}
+                      >
+                        <textarea
+                          value={site.notes}
+                          placeholder="Add notes..."
+                          aria-label={`Notes for ${site.title}`}
+                          onChange={(event) => {
+                            const notes = event.target.value;
+                            setCachedWebsites((previous) =>
+                              previous.map((cachedSite) =>
+                                cachedSite.id === site.id ? { ...cachedSite, notes } : cachedSite,
+                              ),
+                            );
+                          }}
+                        />
+                        <button type="button" onClick={() => saveWebsiteNotes(site)}>
+                          Save notes
+                        </button>
+                      </div>
+                    )}
+                    <p className="card-url" title={site.url}>{site.url}</p>
                     <p className="card-date">Added {formatDate(site.createdAt)}</p>
                     <div className="card-actions">
                       <button
